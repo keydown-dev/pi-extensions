@@ -1,0 +1,36 @@
+{
+  "name": "@keydown-dev/pi-ralph-orchestrator",
+  "version": "0.0.1",
+  "description": "Fresh-context Ralph-style orchestrator for Pi with git checkpoints and handoff artifacts.",
+  "type": "module",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "ralph",
+    "orchestrator",
+    "subagents"
+  ],
+  "license": "MIT",
+  "pi": {
+    "extensions": [
+      "./extensions"
+    ],
+    "skills": [
+      "./skills"
+    ]
+  },
+  "scripts": {
+    "test": "node --import tsx --test \"tests/*.test.ts\" \".tmp/*.test.ts\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.19.0",
+    "typebox": "^1.0.55",
+    "typescript": "^5.8.0"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  }
+}

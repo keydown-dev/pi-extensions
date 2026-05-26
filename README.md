@@ -13,19 +13,33 @@ This package provides:
 - a deterministic scripted worker for test-driving loops
 - todo-style progress rendering adapted from MIT-licensed Pi UI packages
 
-## Install locally
+## Install
 
-From this repo:
+Install directly from GitHub:
+
+```bash
+pi install git:github.com/keydown-dev/pi-ralph-subagents
+```
+
+Or pin a specific branch, tag, or commit:
+
+```bash
+pi install git:github.com/keydown-dev/pi-ralph-subagents@main
+```
+
+For a one-off trial without adding it to your Pi settings:
+
+```bash
+pi -e git:github.com/keydown-dev/pi-ralph-subagents
+```
+
+From a local checkout of this repo:
 
 ```bash
 pi install .
 ```
 
-Or run temporarily:
-
-```bash
-pi -e .
-```
+This package is not published to npm yet, so use the Git or local-path installation forms above.
 
 ## Command reference
 

@@ -1,3 +1,4 @@
+import fs from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
@@ -54,23 +55,39 @@ export class GitPolicy {
       .map((line) => line.slice(3));
   }
 
-  async diffStats(base = "HEAD", options: { excludePrefixes?: string[]; includeUntracked?: boolean } = {}): Promise<{ filesChanged: number; insertions: number; deletions: number }> {
-    const pathspecs = [".", ...(options.excludePrefixes?.map((prefix) => `:(exclude)${prefix}`) ?? [])];
-    if (options.includeUntracked) {
-      const untracked = await this.untrackedPaths(options.excludePrefixes ?? []);
-      if (untracked.length > 0) await this.run(["add", "-N", "--", ...untracked]);
-    }
+  async diffStats(base = "HEAD", options: { excludePrefixes?: string[]; includeUntracked?: boolean; includePaths?: string[] } = {}): Promise<{ filesChanged: number; insertions: number; deletions: number }> {
+    const excludePrefixes = options.excludePrefixes ?? [];
+    const pathspecs = [".", ...excludePrefixes.map((prefix) => `:(exclude)${prefix}`)];
     const numstat = await this.run(["diff", "--numstat", base, "--", ...pathspecs], { trim: false });
+    const trackedPaths = new Set<string>();
     let filesChanged = 0;
     let insertions = 0;
     let deletions = 0;
     for (const line of numstat.split("\n")) {
       if (!line.trim()) continue;
-      const [added, removed] = line.split("\t");
+      const [added, removed, filePath] = line.split("\t");
+      if (filePath) trackedPaths.add(filePath);
       filesChanged += 1;
       insertions += parseNumstatCount(added);
       deletions += parseNumstatCount(removed);
     }
+
+    const extraUntracked = new Set<string>();
+    if (options.includeUntracked) {
+      for (const filePath of await this.untrackedPaths(excludePrefixes)) extraUntracked.add(filePath);
+    }
+    for (const filePath of cleanDeclaredPaths(options.includePaths ?? [], excludePrefixes)) {
+      if (!(await this.isTracked(filePath))) extraUntracked.add(filePath);
+    }
+
+    for (const filePath of extraUntracked) {
+      if (trackedPaths.has(filePath)) continue;
+      const stats = await this.untrackedFileStats(filePath);
+      if (!stats) continue;
+      filesChanged += 1;
+      insertions += stats.insertions;
+    }
+
     return { filesChanged, insertions, deletions };
   }
 
@@ -90,6 +107,26 @@ export class GitPolicy {
     await this.run(["commit", "-m", message]);
     return true;
   }
+
+  private async isTracked(filePath: string): Promise<boolean> {
+    try {
+      await this.run(["ls-files", "--error-unmatch", "--", filePath]);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private async untrackedFileStats(filePath: string): Promise<{ insertions: number } | undefined> {
+    try {
+      const stat = await fs.stat(`${this.cwd}/${filePath}`);
+      if (!stat.isFile()) return undefined;
+      const text = await fs.readFile(`${this.cwd}/${filePath}`, "utf8");
+      return { insertions: text.length === 0 ? 0 : text.split("\n").length - (text.endsWith("\n") ? 1 : 0) };
+    } catch {
+      return { insertions: 0 };
+    }
+  }
 }
 
 function parseNumstatCount(value: string | undefined): number {
@@ -101,6 +138,21 @@ function parseNumstatCount(value: string | undefined): number {
 function isIgnoredStatusLine(line: string, ignorePrefixes: string[]): boolean {
   const pathPart = line.slice(3);
   return ignorePrefixes.some((prefix) => pathPart === prefix || pathPart.startsWith(prefix.endsWith("/") ? prefix : `${prefix}/`));
+}
+
+function cleanDeclaredPaths(paths: string[], excludePrefixes: string[]): string[] {
+  const seen = new Set<string>();
+  const clean: string[] = [];
+  for (const rawPath of paths) {
+    const normalized = rawPath.trim().replace(/^\.[/\\]/, "").replace(/\\/g, "/");
+    if (!normalized || normalized.startsWith("/") || normalized.includes("..")) continue;
+    if (excludePrefixes.some((prefix) => normalized === prefix || normalized.startsWith(prefix.endsWith("/") ? prefix : `${prefix}/`))) continue;
+    if (!seen.has(normalized)) {
+      seen.add(normalized);
+      clean.push(normalized);
+    }
+  }
+  return clean;
 }
 
 export function orchestrationBranch(loopName: string): string {

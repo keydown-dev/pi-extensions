@@ -111,6 +111,21 @@ test("diffStats includes untracked files and excludes Ralph artifacts", async (t
   assert.deepEqual(stats, { filesChanged: 1, insertions: 1, deletions: 0 });
 });
 
+test("declared ignored worker files are counted without being added", async (t) => {
+  const cwd = await createMathFixture();
+  t.after(() => fs.rm(cwd, { recursive: true, force: true }));
+  await fs.mkdir(path.join(cwd, ".tmp"), { recursive: true });
+  await fs.writeFile(path.join(cwd, ".tmp", "add.ts"), "export const add = (a, b) => a + b;\n", "utf8");
+  const git = new GitPolicy(cwd);
+
+  const stats = await git.diffStats("HEAD", { excludePrefixes: [".ralph"], includeUntracked: true, includePaths: [".tmp/add.ts"] });
+  await git.addAllAndCommit("worker: regular changes only");
+
+  assert.deepEqual(stats, { filesChanged: 1, insertions: 1, deletions: 0 });
+  const tracked = (await execFileAsync("git", ["ls-files", ".tmp/add.ts"], { cwd })).stdout.trim();
+  assert.equal(tracked, "");
+});
+
 test("orchestrator artifacts are created under ignored .ralph/orchestrator", async (t) => {
   const cwd = await createMathFixture();
   t.after(() => fs.rm(cwd, { recursive: true, force: true }));
@@ -130,7 +145,7 @@ async function createMathFixture(): Promise<string> {
   await fs.writeFile(path.join(cwd, "package.json"), JSON.stringify({ type: "module", scripts: { test: "node --test" } }, null, 2), "utf8");
   await fs.writeFile(path.join(cwd, "src", "math.js"), "export function add(a, b) {\n  return a + b;\n}\n", "utf8");
   await fs.writeFile(path.join(cwd, "test", "math.test.js"), "import test from 'node:test';\nimport assert from 'node:assert/strict';\nimport { add } from '../src/math.js';\n\ntest('add', () => {\n  assert.equal(add(2, 3), 5);\n});\n", "utf8");
-  await fs.writeFile(path.join(cwd, ".gitignore"), ".ralph/\n.ralph-orchestrator/\n", "utf8");
+  await fs.writeFile(path.join(cwd, ".gitignore"), ".ralph/\n.ralph-orchestrator/\n.tmp/\n", "utf8");
   await execFileAsync("git", ["init"], { cwd });
   await execFileAsync("git", ["config", "user.email", "ralph@example.test"], { cwd });
   await execFileAsync("git", ["config", "user.name", "Ralph Test"], { cwd });

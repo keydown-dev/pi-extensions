@@ -47,7 +47,7 @@ export class PiJsonWorkerRunner {
     const handoffText = (await fs.readFile(handoffOut, "utf8")).trim();
     return {
       summary: extractSummary(handoffText),
-      changedFiles: [],
+      changedFiles: extractChangedFiles(handoffText),
       verification: parseVerification(verificationText),
     };
   }
@@ -82,8 +82,30 @@ async function runPiJson(cwd: string, prompt: string, outputPath: string, worker
     const child = spawn("pi", args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
     let stderr = "";
     let buffered = "";
+    let settled = false;
+    const startedAt = Date.now();
+    let lastOutputAt = startedAt;
+    const absoluteTimeoutMs = readTimeoutMs("RALPH_WORKER_TIMEOUT_MS", 15 * 60_000);
+    const idleTimeoutMs = readTimeoutMs("RALPH_WORKER_IDLE_TIMEOUT_MS", 3 * 60_000);
+
+    void appendJson(outputPath, { type: "worker_process", pid: child.pid, absoluteTimeoutMs, idleTimeoutMs, timestamp: new Date().toISOString() });
+
+    const killTimer = setInterval(() => {
+      const now = Date.now();
+      const absoluteExpired = now - startedAt >= absoluteTimeoutMs;
+      const idleExpired = now - lastOutputAt >= idleTimeoutMs;
+      if (!absoluteExpired && !idleExpired) return;
+      const reason = absoluteExpired ? `timed out after ${absoluteTimeoutMs}ms` : `produced no output for ${idleTimeoutMs}ms`;
+      stderr = [stderr, `Ralph worker ${reason}; killed child process ${child.pid ?? "unknown"}.`].filter(Boolean).join("\n");
+      child.kill("SIGTERM");
+      setTimeout(() => {
+        if (!settled) child.kill("SIGKILL");
+      }, 5_000).unref();
+    }, 1_000);
+    killTimer.unref();
 
     child.stdout.on("data", (chunk: Buffer) => {
+      lastOutputAt = Date.now();
       const text = chunk.toString();
       void fs.appendFile(outputPath, chunk);
       buffered += text;
@@ -100,10 +122,17 @@ async function runPiJson(cwd: string, prompt: string, outputPath: string, worker
       }
     });
     child.stderr.on("data", (chunk: Buffer) => {
+      lastOutputAt = Date.now();
       stderr += chunk.toString();
     });
-    child.on("error", reject);
+    child.on("error", (error) => {
+      clearInterval(killTimer);
+      settled = true;
+      reject(error);
+    });
     child.on("close", (code) => {
+      clearInterval(killTimer);
+      settled = true;
       const trimmed = buffered.trim();
       if (trimmed) {
         try {
@@ -278,6 +307,19 @@ async function readOptional(filePath: string): Promise<string> {
 function extractSummary(handoffText: string): string {
   const summarySection = handoffText.match(/## Summary\s+([\s\S]*?)(?:\n## |$)/i)?.[1]?.trim();
   return summarySection || handoffText.split("\n").find((line) => line.trim() && !line.startsWith("#"))?.trim() || "Worker produced handoff-out.md.";
+}
+
+function extractChangedFiles(handoffText: string): string[] {
+  const section = handoffText.match(/## Changed files\s+([\s\S]*?)(?:\n## |$)/i)?.[1] ?? "";
+  return section
+    .split("\n")
+    .map((line) => line.match(/^\s*[-*]\s+`?([^`\n]+?)`?\s*$/)?.[1]?.trim())
+    .filter((filePath): filePath is string => Boolean(filePath));
+}
+
+function readTimeoutMs(name: string, fallback: number): number {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
 function parseVerification(text: string): VerificationRecord {

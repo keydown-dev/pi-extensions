@@ -110,7 +110,7 @@ export class RalphOrchestrator {
     }, forwardWorkerProgress);
 
     result.changedFiles = result.changedFiles.length > 0 ? result.changedFiles : await this.git.changedPaths();
-    iteration.diff = await this.git.diffStats("HEAD", { excludePrefixes: [".ralph"], includeUntracked: true });
+    iteration.diff = await this.git.diffStats("HEAD", { excludePrefixes: [".ralph"], includeUntracked: true, includePaths: result.changedFiles });
 
     iteration.verification = result.verification;
     iteration.status = result.verification.status === "passed" ? "accepted" : "failed";

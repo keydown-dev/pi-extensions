@@ -110,6 +110,7 @@ export class RalphOrchestrator {
     }, forwardWorkerProgress);
 
     result.changedFiles = result.changedFiles.length > 0 ? result.changedFiles : await this.git.changedPaths();
+    iteration.diff = await this.git.diffStats("HEAD", { excludePrefixes: [".ralph"], includeUntracked: true });
 
     iteration.verification = result.verification;
     iteration.status = result.verification.status === "passed" ? "accepted" : "failed";
@@ -151,7 +152,11 @@ export function renderStatus(state: LoopState): string {
     `Status: ${state.status} · Iteration ${state.currentIteration}${max} · Todos ${completed}/${state.todos.length}`,
     `Branch: ${state.branch}`,
     "",
-    ...state.todos.map((todo, index) => `${index === state.todos.length - 1 ? "└─" : "├─"} ${todoIcon(todo.status)} #${todo.id} ${todo.title}${todo.status === "running" ? " (working)" : ""}`),
+    ...state.todos.map((todo, index) => {
+      const iteration = latestIterationForTodo(state, todo.id);
+      const diff = iteration?.diff ? ` · ${formatDiffStats(iteration.diff)}` : "";
+      return `${index === state.todos.length - 1 ? "└─" : "├─"} ${todoIcon(todo.status)} #${todo.id} ${todo.title}${todo.status === "running" ? " (working)" : ""}${diff}`;
+    }),
     "",
     "ESC pauses the assistant; /ralph stop <name> stops the loop.",
   ];
@@ -169,6 +174,18 @@ export function renderLoopList(states: LoopState[]): string {
 
 function statusIcon(status: LoopState["status"]): string {
   return status === "running" ? "◐" : status === "ready" ? "●" : status === "completed" ? "✓" : status === "failed" ? "✗" : status === "awaiting_acceptance" ? "◐" : "○";
+}
+
+function latestIterationForTodo(state: LoopState, todoId: number): LoopState["iterations"][number] | undefined {
+  for (let index = state.iterations.length - 1; index >= 0; index--) {
+    const iteration = state.iterations[index];
+    if (iteration?.todoId === todoId) return iteration;
+  }
+  return undefined;
+}
+
+function formatDiffStats(diff: { filesChanged: number; insertions: number; deletions: number }): string {
+  return `+${diff.insertions} / -${diff.deletions} · ${diff.filesChanged} files`;
 }
 
 function todoIcon(status: LoopState["todos"][number]["status"]): string {

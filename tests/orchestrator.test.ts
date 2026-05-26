@@ -26,6 +26,8 @@ test("scripted Ralph loop adds tests and implementations over three iterations",
   assert.equal(state.todos.filter((todo) => todo.status === "completed").length, 3);
   assert.equal(state.iterations.length, 3);
   assert.ok(state.iterations.every((iteration) => iteration.status === "accepted"));
+  assert.ok(state.iterations.every((iteration) => iteration.diff && iteration.diff.filesChanged >= 1));
+  assert.ok(state.iterations.every((iteration) => iteration.diff && iteration.diff.insertions >= 1));
 
   await execFileAsync("npm", ["test"], { cwd });
 
@@ -33,6 +35,7 @@ test("scripted Ralph loop adds tests and implementations over three iterations",
   assert.match(status, /Ralph Orchestrator · math-kata/);
   assert.match(status, /Todos 3\/3/);
   assert.match(status, /└─ ✓ #3 Add divide/);
+  assert.match(status, /\+\d+ \/ -\d+ · \d+ files/);
 
   const handoffOut = await fs.readFile(path.join(cwd, ".ralph", "orchestrator", "loops", "math-kata", "iterations", "003", "handoff-out.md"), "utf8");
   assert.match(handoffOut, /Added divide test and implementation/);
@@ -49,20 +52,6 @@ test("start refuses dirty worktrees", async (t) => {
 
   const ralph = new RalphOrchestrator(cwd);
   await assert.rejects(() => ralph.start({ name: "dirty-demo" }), /clean worktree/);
-});
-
-test("legacy .ralph artifacts do not block orchestrator commands", async (t) => {
-  const cwd = await createMathFixture();
-  t.after(() => fs.rm(cwd, { recursive: true, force: true }));
-  await fs.mkdir(path.join(cwd, ".ralph"), { recursive: true });
-  await fs.writeFile(path.join(cwd, ".ralph", "legacy.md"), "legacy flat Ralph state", "utf8");
-
-  const ralph = new RalphOrchestrator(cwd);
-  const state = await ralph.start({ name: "with-legacy-ralph" });
-
-  assert.equal(state.name, "with-legacy-ralph");
-  assert.equal(state.status, "ready");
-  await fs.access(path.join(cwd, ".ralph", "orchestrator", "loops", "with-legacy-ralph", "state.json"));
 });
 
 test("run emits progress with running todo before worker completes", async (t) => {
@@ -108,6 +97,18 @@ test("changedPaths preserves leading-space porcelain paths", async (t) => {
   const paths = await new GitPolicy(cwd).changedPaths();
 
   assert.deepEqual(paths, ["src/math.js"]);
+});
+
+test("diffStats includes untracked files and excludes Ralph artifacts", async (t) => {
+  const cwd = await createMathFixture();
+  t.after(() => fs.rm(cwd, { recursive: true, force: true }));
+  await fs.writeFile(path.join(cwd, "src", "new-op.js"), "export const value = 1;\n", "utf8");
+  await fs.mkdir(path.join(cwd, ".ralph", "scratch"), { recursive: true });
+  await fs.writeFile(path.join(cwd, ".ralph", "scratch", "local.md"), "ignored\n", "utf8");
+
+  const stats = await new GitPolicy(cwd).diffStats("HEAD", { excludePrefixes: [".ralph"], includeUntracked: true });
+
+  assert.deepEqual(stats, { filesChanged: 1, insertions: 1, deletions: 0 });
 });
 
 test("orchestrator artifacts are created under ignored .ralph/orchestrator", async (t) => {

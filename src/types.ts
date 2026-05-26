@@ -18,6 +18,12 @@ export interface VerificationRecord {
   notes?: string;
 }
 
+export interface IterationDiffStats {
+  filesChanged: number;
+  insertions: number;
+  deletions: number;
+}
+
 export interface IterationState {
   number: number;
   status: IterationStatus;
@@ -28,6 +34,7 @@ export interface IterationState {
   startedAt: string;
   completedAt?: string;
   verification?: VerificationRecord;
+  diff?: IterationDiffStats;
 }
 
 export interface LoopState {

@@ -21,16 +21,10 @@ export default function (pi: ExtensionAPI) {
       ctx.ui.setWidget("ralph", undefined);
       return;
     }
-    const { theme } = ctx.ui;
-    const max = state.maxIterations ? `/${state.maxIterations}` : "";
-    ctx.ui.setStatus("ralph", theme.fg("accent", `🔄 ${state.name} (${state.currentIteration}${max})`));
-    ctx.ui.setWidget("ralph", renderStatusWithProgress(state, worker).split("\n").map((line, index) => {
-      if (index === 0) return theme.fg("accent", theme.bold(line));
-      if (line.includes("✓")) return theme.fg("success", line);
-      if (line.includes("◐") || line.startsWith("Worker:")) return theme.fg("warning", line);
-      if (line.includes("✗")) return theme.fg("error", line);
-      if (line.includes("○") || line.startsWith("ESC")) return theme.fg("dim", line);
-      return line;
+    ctx.ui.setStatus("ralph", undefined);
+    ctx.ui.setWidget("ralph", (_tui, widgetTheme) => ({
+      render: (width: number) => renderRalphWidget(state, worker, widgetTheme, width),
+      invalidate: () => {},
     }));
   }
 
@@ -397,7 +391,7 @@ export default function (pi: ExtensionAPI) {
     if (/\bralph\b/i.test(event.text) && /\b(loop|loops|iterate|iterations|issues?)\b/i.test(event.text) && !event.text.startsWith("/")) {
       return {
         action: "transform" as const,
-        text: `${event.text}\n\nIf this is a request to create or manage a Ralph loop, use the ralph_orchestrator_start, ralph_orchestrator_next, ralph_orchestrator_run, ralph_orchestrator_status, or ralph_orchestrator_list tools as appropriate rather than the legacy flat Ralph tool.`,
+        text: `${event.text}\n\nIf this is a request to create or manage a Ralph loop, use the ralph_orchestrator_start, ralph_orchestrator_next, ralph_orchestrator_run, ralph_orchestrator_status, or ralph_orchestrator_list tools as appropriate.`,
       };
     }
     return { action: "continue" as const };
@@ -487,6 +481,137 @@ function renderToolResponse(state: LoopState, lead: string): string {
 
 function renderProgressText(progress: OrchestratorProgress): string {
   return `${progress.message}\n\n${renderStatusWithProgress(progress.state, progress.worker)}`;
+}
+
+type RalphTheme = ExtensionContext["ui"]["theme"];
+
+const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+function renderRalphWidget(state: LoopState, worker: WorkerProgress | undefined, theme: RalphTheme, width: number): string[] {
+  const completed = state.todos.filter((todo) => todo.status === "completed").length;
+  const max = state.maxIterations ? `/${state.maxIterations}` : "";
+  const rule = theme.fg("accent", "─".repeat(Math.max(0, width)));
+  const lines: string[] = [
+    rule,
+    theme.fg("accent", theme.bold(`Ralph Loop · ${state.name} · Iteration ${state.currentIteration}${max} · Todos ${completed}/${state.todos.length}`)),
+    "",
+  ];
+
+  for (const todo of state.todos) {
+    const iteration = latestIterationForTodo(state, todo.id);
+    const isRunning = todo.status === "running";
+    const prefix = isRunning ? theme.fg("accent", "› ") : "  ";
+    const icon = todoGlyph(todo.status, worker?.elapsedMs);
+    const iconColor = todo.status === "completed" ? "success" : todo.status === "failed" ? "error" : todo.status === "running" ? "accent" : "dim";
+    const titleColor = todo.status === "running" ? "accent" : todo.status === "pending" ? "text" : "muted";
+    lines.push(`${prefix}${theme.fg(iconColor, icon)} ${theme.fg(titleColor, `#${todo.id} ${todo.title}`)}`);
+    lines.push(`  ${renderTodoDetail(todo.status, iteration, isRunning ? worker : undefined, theme)}`);
+    lines.push("");
+  }
+
+  lines.push(rule);
+  lines.push(theme.fg("dim", "Esc pause · /ralph-stop stop loop · /ralph-status refresh"));
+  return lines.map((line) => truncateAnsiToWidth(line, width));
+}
+
+function truncateAnsiToWidth(input: string, width: number): string {
+  if (width <= 0) return "";
+  let visible = 0;
+  let output = "";
+  for (let index = 0; index < input.length;) {
+    if (input[index] === "\x1b") {
+      const match = input.slice(index).match(/^\x1b\[[0-?]*[ -/]*[@-~]/);
+      if (match) {
+        output += match[0];
+        index += match[0].length;
+        continue;
+      }
+    }
+    const char = Array.from(input.slice(index))[0] ?? "";
+    if (!char) break;
+    if (visible + 1 > width) return `${output}\x1b[0m`;
+    output += char;
+    visible += 1;
+    index += char.length;
+  }
+  return output;
+}
+
+function latestIterationForTodo(state: LoopState, todoId: number): LoopState["iterations"][number] | undefined {
+  for (let index = state.iterations.length - 1; index >= 0; index--) {
+    const iteration = state.iterations[index];
+    if (iteration?.todoId === todoId) return iteration;
+  }
+  return undefined;
+}
+
+function renderTodoDetail(status: LoopState["todos"][number]["status"], iteration: LoopState["iterations"][number] | undefined, worker: WorkerProgress | undefined, theme: RalphTheme): string {
+  if (status === "running" && worker) {
+    const model = worker.model ? `${worker.provider ? `${worker.provider}/` : ""}${worker.model}` : worker.configuredModel;
+    const tools = worker.toolNames.length ? ` · tools ${worker.toolNames.slice(-3).join(", ")}` : ` · ${worker.toolCalls} tools`;
+    return [
+      theme.fg("muted", `running · ${formatElapsed(worker.elapsedMs)}`),
+      model ? theme.fg("muted", ` · ${model}`) : "",
+      theme.fg("muted", tools),
+      renderContextUsage(worker, theme),
+    ].join("");
+  }
+
+  if (status === "completed" || status === "failed") {
+    const verification = iteration?.verification?.status;
+    const verificationText = verification === "passed" ? theme.fg("success", "verification ok") : verification === "failed" ? theme.fg("error", "verification failed") : theme.fg("warning", "verification not run");
+    const diff = iteration?.diff ? `${renderDiffStats(iteration.diff, theme)} · ` : "";
+    const result = status === "completed" ? theme.fg("success", "passed") : theme.fg("error", "failed");
+    return `${result} · ${diff}${verificationText}`;
+  }
+
+  return theme.fg("dim", "pending");
+}
+
+function renderDiffStats(diff: NonNullable<LoopState["iterations"][number]["diff"]>, theme: RalphTheme): string {
+  return [
+    theme.fg("success", `+${diff.insertions}`),
+    theme.fg("muted", " / "),
+    theme.fg("error", `-${diff.deletions}`),
+    theme.fg("muted", ` · ${diff.filesChanged} files`),
+  ].join("");
+}
+
+function renderContextUsage(worker: WorkerProgress, theme: RalphTheme): string {
+  const usage = worker.latestUsage ?? worker.usage;
+  if (!usage.totalTokens) return "";
+  const contextWindow = inferContextWindow(worker.model ?? worker.configuredModel);
+  if (!contextWindow) return theme.fg("muted", ` · ctx ${formatTokenCount(usage.totalTokens)}`);
+  const percent = Math.round((usage.totalTokens / contextWindow) * 100);
+  const color = percent > 50 ? "error" : percent >= 40 ? "warning" : "success";
+  return theme.fg(color, ` · ctx ${formatTokenCount(usage.totalTokens)} / ${formatTokenCount(contextWindow)} ${percent}%`);
+}
+
+function inferContextWindow(model: string | undefined): number | undefined {
+  const normalized = model?.toLowerCase() ?? "";
+  if (!normalized) return undefined;
+  if (normalized.includes("gemini-1.5") || normalized.includes("gemini-2")) return 1_000_000;
+  if (normalized.includes("claude") || normalized.includes("sonnet") || normalized.includes("opus") || normalized.includes("haiku")) return 200_000;
+  if (normalized.includes("gpt-4o") || normalized.includes("gpt-4.1") || normalized.includes("o3") || normalized.includes("o4")) return 128_000;
+  return undefined;
+}
+
+function formatTokenCount(tokens: number): string {
+  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(tokens % 1_000_000 === 0 ? 0 : 1)}m`;
+  if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(tokens % 1_000 === 0 ? 0 : 1)}k`;
+  return tokens.toLocaleString();
+}
+
+function spinnerFrame(elapsedMs = Date.now()): string {
+  return SPINNER_FRAMES[Math.floor(elapsedMs / 120) % SPINNER_FRAMES.length] ?? "⠋";
+}
+
+function statusGlyph(status: LoopState["status"]): string {
+  return status === "running" ? spinnerFrame() : status === "ready" ? "●" : status === "completed" ? "✓" : status === "failed" ? "✗" : status === "stopped" ? "⏸" : "○";
+}
+
+function todoGlyph(status: LoopState["todos"][number]["status"], elapsedMs?: number): string {
+  return status === "running" ? spinnerFrame(elapsedMs) : status === "pending" ? "○" : status === "completed" ? "✓" : "✗";
 }
 
 function renderStatusWithProgress(state: LoopState, worker?: WorkerProgress): string {

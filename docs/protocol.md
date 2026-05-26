@@ -20,6 +20,14 @@ Loop artifacts live under `.ralph/orchestrator/loops/<loop>/`. Projects should u
 - `git-before.txt`: status before worker activity.
 - `git-after.txt`: status after worker activity.
 
+## Git policy
+
+- Starting a loop requires a clean worktree and creates/checks out `orchestrator/<loop>`.
+- The initial loop state is committed on that branch.
+- Each iteration commits handoff context before the worker starts.
+- Each completed iteration commits worker changes and artifacts after verification is captured.
+- Displayed diff stats are computed from code changes since the handoff commit, excluding `.ralph/` artifacts.
+
 ## Initial git refs
 
 - `refs/ralph/<loop>/iter-001-before`

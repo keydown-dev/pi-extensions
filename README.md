@@ -93,12 +93,14 @@ The status widget uses a compact todo-style vocabulary:
 
 ```text
 ○ pending
-◐ in progress
+⠹ running spinner
 ✓ completed
 ✗ failed
 ```
 
-`/ralph-next` and `/ralph-run` default to a real fresh-context Pi worker via `pi --mode json`. Pass `--model MODEL` (or the agent tool `model` parameter) to use any model pattern/ID already configured in Pi, independent of the parent/orchestrator session model. The worker receives a bounded handoff and writes `handoff-out.md` and `verification.md`; the orchestrator captures `worker-output.jsonl`, git status, and before/after refs. While the worker runs, the UI marks the active todo as working and streams worker progress including model, elapsed time, JSON events, tool calls, assistant messages, token usage, and cost when reported by Pi.
+Ralph is intentionally Git-first. Starting a loop requires a clean worktree, creates/checks out `orchestrator/<loop-name>`, and commits the initial loop state. Each iteration commits its handoff context before the worker starts, then commits the worker result when the iteration finishes. The orchestrator records before/after refs and captures code diff stats for completed work, excluding local `.ralph/` artifacts from the displayed line counts.
+
+`/ralph-next` and `/ralph-run` default to a real fresh-context Pi worker via `pi --mode json`. Pass `--model MODEL` (or the agent tool `model` parameter) to use any model pattern/ID already configured in Pi, independent of the parent/orchestrator session model. The worker receives a bounded handoff and writes `handoff-out.md` and `verification.md`; the orchestrator captures `worker-output.jsonl`, git status, before/after refs, and per-iteration diff stats. While the worker runs, the UI marks the active todo with a Braille spinner and streams worker progress including model, elapsed time, JSON events, tool calls, assistant messages, token usage, context-window percentage when inferable, and cost when reported by Pi.
 
 Ralph artifacts live under `.ralph/orchestrator/`. This repo ignores `.ralph/` so loop state, handoffs, and worker transcripts stay local unless a project explicitly chooses to track them.
 

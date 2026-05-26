@@ -54,6 +54,35 @@ export class GitPolicy {
       .map((line) => line.slice(3));
   }
 
+  async diffStats(base = "HEAD", options: { excludePrefixes?: string[]; includeUntracked?: boolean } = {}): Promise<{ filesChanged: number; insertions: number; deletions: number }> {
+    const pathspecs = [".", ...(options.excludePrefixes?.map((prefix) => `:(exclude)${prefix}`) ?? [])];
+    if (options.includeUntracked) {
+      const untracked = await this.untrackedPaths(options.excludePrefixes ?? []);
+      if (untracked.length > 0) await this.run(["add", "-N", "--", ...untracked]);
+    }
+    const numstat = await this.run(["diff", "--numstat", base, "--", ...pathspecs], { trim: false });
+    let filesChanged = 0;
+    let insertions = 0;
+    let deletions = 0;
+    for (const line of numstat.split("\n")) {
+      if (!line.trim()) continue;
+      const [added, removed] = line.split("\t");
+      filesChanged += 1;
+      insertions += parseNumstatCount(added);
+      deletions += parseNumstatCount(removed);
+    }
+    return { filesChanged, insertions, deletions };
+  }
+
+  private async untrackedPaths(excludePrefixes: string[]): Promise<string[]> {
+    const output = await this.run(["ls-files", "--others", "--exclude-standard"], { trim: false });
+    return output
+      .split("\n")
+      .map((line) => line.trimEnd())
+      .filter(Boolean)
+      .filter((filePath) => !excludePrefixes.some((prefix) => filePath === prefix || filePath.startsWith(prefix.endsWith("/") ? prefix : `${prefix}/`)));
+  }
+
   async addAllAndCommit(message: string): Promise<boolean> {
     await this.run(["add", "-A"]);
     const staged = await this.run(["diff", "--cached", "--name-only"]);
@@ -61,6 +90,12 @@ export class GitPolicy {
     await this.run(["commit", "-m", message]);
     return true;
   }
+}
+
+function parseNumstatCount(value: string | undefined): number {
+  if (!value || value === "-") return 0;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function isIgnoredStatusLine(line: string, ignorePrefixes: string[]): boolean {

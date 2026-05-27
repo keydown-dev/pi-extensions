@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { deriveLoopStatus, RalphOrchestrator, renderLoopList, renderStatus } from "../src/orchestrator.js";
-import type { LoopState, OrchestratorProgress, WorkerMode, WorkerProgress, WorkerUsage } from "../src/types.js";
+import type { IterationCompleteEvent, LoopState, OrchestratorProgress, WorkerMode, WorkerProgress, WorkerUsage } from "../src/types.js";
 
 let currentLoop: string | null = null;
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -24,7 +24,7 @@ export default function (pi: ExtensionAPI) {
     }
     ctx.ui.setStatus("ralph", undefined);
     ctx.ui.setWidget("ralph", (tui, widgetTheme) => {
-      const interval = state.todos.some((todo) => todo.status === "running") ? setInterval(() => tui.requestRender(), 80) : undefined;
+      const interval = state.todos.some((todo) => todo.status === "running") ? setInterval(() => tui.requestRender(), PI_WORKING_SPINNER_INTERVAL_MS) : undefined;
       return {
         render: (width: number) => renderRalphWidget(state, worker, widgetTheme, width),
         invalidate: () => {},
@@ -40,6 +40,20 @@ export default function (pi: ExtensionAPI) {
       currentLoop = progress.state.name;
       updateUI(ctx, progress.state, progress.worker);
     };
+  }
+
+  function postIterationSummary(event: IterationCompleteEvent): void {
+    pi.sendMessage({
+      customType: "ralph-iteration-summary",
+      content: renderIterationSummary(event),
+      display: true,
+      details: {
+        loop: event.state.name,
+        iteration: event.iteration.number,
+        todoId: event.todo.id,
+        verification: event.result.verification.status,
+      },
+    });
   }
 
   async function startLoop(args: string, ctx: ExtensionContext): Promise<void> {
@@ -95,7 +109,7 @@ export default function (pi: ExtensionAPI) {
     if (!name) throw new Error("Usage: /ralph-run [name] [--max N] [--runner pi-json] [--model MODEL]");
     const maxIterations = parseMax(argv) ?? 1;
     startBackgroundLoop(ctx, name, `Ralph run for ${name}`, async () => {
-      const state = await new RalphOrchestrator(ctx.cwd, packageRoot).run(name, { maxIterations, workerMode: parseRunner(argv), workerModel: parseModel(argv), onProgress: commandProgress(ctx) });
+      const state = await new RalphOrchestrator(ctx.cwd, packageRoot).run(name, { maxIterations, workerMode: parseRunner(argv), workerModel: parseModel(argv), onProgress: commandProgress(ctx), onIterationComplete: postIterationSummary });
       return { state, message: `Ralph run stopped at ${state.currentIteration} (${deriveLoopStatus(state)})` };
     });
   }
@@ -209,7 +223,7 @@ export default function (pi: ExtensionAPI) {
       currentLoop = name;
       const maxIterations = params.maxIterations ?? 1;
       const job = new RalphOrchestrator(ctx.cwd, packageRoot)
-        .run(name, { maxIterations, workerMode: parseRunnerValue(params.runner), workerModel: params.model, onProgress: commandProgress(ctx) })
+        .run(name, { maxIterations, workerMode: parseRunnerValue(params.runner), workerModel: params.model, onProgress: commandProgress(ctx), onIterationComplete: postIterationSummary })
         .then((state) => {
           setCurrent(ctx, state);
           ctx.ui.notify(`Ralph run stopped at ${state.currentIteration} (${deriveLoopStatus(state)})`, "info");
@@ -379,8 +393,9 @@ function renderToolResponse(state: LoopState, lead: string): string {
 
 type RalphTheme = ExtensionContext["ui"]["theme"];
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const PI_WORKING_SPINNER_INTERVAL_MS = 80;
 
-function renderRalphWidget(state: LoopState, worker: WorkerProgress | undefined, theme: RalphTheme, width: number): string[] {
+export function renderRalphWidget(state: LoopState, worker: WorkerProgress | undefined, theme: RalphTheme, width: number): string[] {
   const completed = state.todos.filter((todo) => todo.status === "complete").length;
   const max = state.maxIterations ? `/${state.maxIterations}` : "";
   const rule = theme.fg("accent", "─".repeat(Math.max(0, width)));
@@ -443,10 +458,13 @@ function renderTodoDetail(status: LoopState["todos"][number]["status"], iteratio
 
   if (status === "complete" || status === "failed" || status === "interrupted") {
     const verification = iteration?.verification?.status;
-    const verificationText = verification === "passed" ? theme.fg("success", "verification ok") : verification === "failed" ? theme.fg("error", "verification failed") : theme.fg("warning", "verification not run");
-    const diff = iteration?.diff ? `${renderDiffStats(iteration.diff, theme)} · ` : "";
     const result = status === "complete" ? theme.fg("success", "passed") : status === "interrupted" ? theme.fg("warning", "interrupted") : theme.fg("error", "failed");
-    return `${result} · ${diff}${verificationText}`;
+    const segments = [result];
+    if (iteration?.diff) segments.push(renderDiffStats(iteration.diff, theme));
+    if (iteration?.usage) segments.push(renderCompactUsage(iteration.usage, theme));
+    if (verification === "failed") segments.push(theme.fg("error", "✗ verification"));
+    if (verification === "not_run" || !verification) segments.push(theme.fg("error", "✗ verification not run"));
+    return segments.join(theme.fg("muted", " · "));
   }
 
   if (status === "deferred") return theme.fg("dim", "deferred");
@@ -455,6 +473,12 @@ function renderTodoDetail(status: LoopState["todos"][number]["status"], iteratio
 
 function renderDiffStats(diff: NonNullable<LoopState["iterations"][number]["diff"]>, theme: RalphTheme): string {
   return [theme.fg("success", `+${diff.insertions}`), theme.fg("muted", " / "), theme.fg("error", `-${diff.deletions}`), theme.fg("muted", ` · ${diff.filesChanged} files`)].join("");
+}
+
+function renderCompactUsage(usage: WorkerUsage, theme: RalphTheme): string {
+  if (!usage.totalTokens) return "";
+  const cost = usage.cost && usage.cost > 0 ? ` · $${usage.cost.toFixed(4)}` : "";
+  return theme.fg("muted", `${formatTokenCount(usage.totalTokens)} tok${cost}`);
 }
 
 function renderContextUsage(worker: WorkerProgress, theme: RalphTheme): string {
@@ -483,7 +507,7 @@ function formatTokenCount(tokens: number): string {
 }
 
 function spinnerFrame(elapsedMs = Date.now()): string {
-  return SPINNER_FRAMES[Math.floor(elapsedMs / 80) % SPINNER_FRAMES.length] ?? "⠋";
+  return SPINNER_FRAMES[Math.floor(elapsedMs / PI_WORKING_SPINNER_INTERVAL_MS) % SPINNER_FRAMES.length] ?? "⠋";
 }
 
 function todoGlyph(status: LoopState["todos"][number]["status"], elapsedMs?: number): string {
@@ -506,6 +530,36 @@ function nextActionForState(state: LoopState): string {
   return `Loop is paused. Run it again with /ralph-run ${state.name} when ready.`;
 }
 
+function renderIterationSummary(event: IterationCompleteEvent): string {
+  const { state, iteration, todo, result } = event;
+  const passed = result.verification.status === "passed";
+  const lines = [
+    `${passed ? "✓" : "✗"} Ralph iteration #${iteration.number} ${passed ? "completed and verified" : "needs attention"}`,
+    "",
+    `Loop: ${state.name}`,
+    `Task: #${todo.id} ${todo.title}`,
+    `Status: ${todo.status}`,
+  ];
+
+  if (iteration.diff) lines.push(`Changed: ${plainDiffStats(iteration.diff)}`);
+  const files = iteration.changedFiles ?? result.changedFiles;
+  if (files.length) lines.push("Files:", ...files.map((file) => `- ${file}`));
+  const usage = iteration.usage ?? result.usage;
+  if (usage?.totalTokens) lines.push(`Used: ${formatUsage(usage)}`);
+
+  lines.push("Verification:");
+  for (const command of result.verification.commands) {
+    lines.push(`- ${command.command} → ${command.exitCode}: ${command.summary}`);
+  }
+  if (result.verification.notes) lines.push(`Notes: ${result.verification.notes}`);
+  lines.push("", "Summary:", result.summary || "Worker did not provide a summary.");
+  return lines.join("\n");
+}
+
+function plainDiffStats(diff: NonNullable<LoopState["iterations"][number]["diff"]>): string {
+  return `+${diff.insertions} / -${diff.deletions} · ${diff.filesChanged} files`;
+}
+
 function iterationArtifacts(state: LoopState): Record<string, string> {
   const base = path.join(".ralph", "orchestrator", "loops", state.name);
   const artifacts: Record<string, string> = { loopDir: base, plan: path.join(base, "plan.md"), state: path.join(base, "state.json") };
@@ -520,7 +574,6 @@ function iterationArtifacts(state: LoopState): Record<string, string> {
 }
 
 function formatUsage(usage: WorkerUsage): string {
-  const cost = usage.cost ? ` · $${usage.cost.toFixed(4)}` : "";
-  return `${usage.totalTokens.toLocaleString()} tok (in ${usage.input.toLocaleString()}, out ${usage.output.toLocaleString()}, cache ${usage.cacheRead.toLocaleString()})${cost}`;
+  const cost = usage.cost && usage.cost > 0 ? ` · $${usage.cost.toFixed(4)}` : "";
+  return `${usage.totalTokens.toLocaleString()} tok (in ${usage.input.toLocaleString()}, out ${usage.output.toLocaleString()}, cache read ${usage.cacheRead.toLocaleString()}, cache write ${usage.cacheWrite.toLocaleString()})${cost}`;
 }
-void formatUsage;

@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
-import type { IterationState, LoopState, RalphTodo, TodoStatus, VerificationRecord } from "./types.js";
+import type { IterationState, LoopState, RalphTodo, TodoStatus, VerificationRecord, WorkerResult } from "./types.js";
 import { ROOT_DIR, iterationDir, loopDir, statePath, slugifyLoopName } from "./paths.js";
 
 export class RalphStore {
@@ -86,7 +86,7 @@ export class RalphStore {
     await fs.writeFile(path.join(dir, "worker-output.jsonl"), "", "utf8");
   }
 
-  async writeWorkerArtifacts(state: LoopState, iteration: IterationState, result: { summary: string; changedFiles: string[]; verification: VerificationRecord }): Promise<void> {
+  async writeWorkerArtifacts(state: LoopState, iteration: IterationState, result: WorkerResult): Promise<void> {
     const dir = this.getIterationDir(state.name, iteration.number);
     const handoffOut = path.join(dir, "handoff-out.md");
     if (!(await fileExists(handoffOut))) {
@@ -154,6 +154,15 @@ const IterationDiffStatsSchema = Type.Object({
   deletions: Type.Number(),
 }, { additionalProperties: false });
 
+const WorkerUsageSchema = Type.Object({
+  input: Type.Number(),
+  output: Type.Number(),
+  cacheRead: Type.Number(),
+  cacheWrite: Type.Number(),
+  totalTokens: Type.Number(),
+  cost: Type.Optional(Type.Number()),
+}, { additionalProperties: false });
+
 const IterationStateSchema = Type.Object({
   number: Type.Number(),
   status: Type.Union([
@@ -173,6 +182,9 @@ const IterationStateSchema = Type.Object({
   completedAt: Type.Optional(Type.String()),
   verification: Type.Optional(VerificationRecordSchema),
   diff: Type.Optional(IterationDiffStatsSchema),
+  usage: Type.Optional(WorkerUsageSchema),
+  summary: Type.Optional(Type.String()),
+  changedFiles: Type.Optional(Type.Array(Type.String())),
 }, { additionalProperties: false });
 
 const RalphTodoSchema = Type.Object({

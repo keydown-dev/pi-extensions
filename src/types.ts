@@ -36,6 +36,9 @@ export interface IterationState {
   completedAt?: string;
   verification?: VerificationRecord;
   diff?: IterationDiffStats;
+  usage?: WorkerUsage;
+  summary?: string;
+  changedFiles?: string[];
 }
 
 export interface LoopState {
@@ -88,11 +91,19 @@ export interface OrchestratorProgress {
   worker?: WorkerProgress;
 }
 
+export interface IterationCompleteEvent {
+  state: LoopState;
+  iteration: IterationState;
+  todo: RalphTodo;
+  result: WorkerResult;
+}
+
 export interface RunOptions {
   maxIterations?: number;
   workerMode?: WorkerMode;
   workerModel?: string;
   onProgress?: (progress: OrchestratorProgress) => void | Promise<void>;
+  onIterationComplete?: (event: IterationCompleteEvent) => void | Promise<void>;
 }
 
 export interface WorkerInput {
@@ -110,4 +121,5 @@ export interface WorkerResult {
   summary: string;
   changedFiles: string[];
   verification: VerificationRecord;
+  usage?: WorkerUsage;
 }

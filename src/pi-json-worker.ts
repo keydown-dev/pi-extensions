@@ -19,6 +19,7 @@ export class PiJsonWorkerRunner {
     tracker.stopHeartbeat();
     await appendJson(outputPath, { type: "worker_exit", exitCode, stderr, timestamp: new Date().toISOString() });
     tracker.mark("exited", "worker_exit");
+    const usage = nonEmptyUsage(tracker.getUsage());
 
     if (exitCode !== 0) {
       return {
@@ -29,6 +30,7 @@ export class PiJsonWorkerRunner {
           commands: [{ command: "pi --mode json <ralph-pickup>", exitCode, summary: killed ? "Worker process killed by ralph-kill" : stderr || "Worker process failed" }],
           notes: killed ? "Worker was killed by ralph-kill. Partial edits may remain; inspect git status before resuming." : undefined,
         },
+        usage,
       };
     }
 
@@ -42,6 +44,7 @@ export class PiJsonWorkerRunner {
           commands: [{ command: "check handoff-out.md", exitCode: 1, summary: "Missing handoff-out.md" }],
           notes: "Fresh worker must produce handoff-out.md before the orchestrator can accept the iteration.",
         },
+        usage,
       };
     }
 
@@ -50,6 +53,7 @@ export class PiJsonWorkerRunner {
       summary: extractSummary(handoffText),
       changedFiles: extractChangedFiles(handoffText),
       verification: parseVerification(verificationText),
+      usage,
     };
   }
 
@@ -204,6 +208,10 @@ class WorkerProgressTracker {
     this.emit(true);
   }
 
+  getUsage(): WorkerUsage {
+    return { ...this.progress.usage };
+  }
+
   record(event: unknown): void {
     const record = event as { type?: string; message?: { role?: string; usage?: unknown; model?: string; provider?: string; api?: string }; assistantMessageEvent?: { type?: string; partial?: { content?: unknown[]; model?: string; provider?: string; api?: string } } };
     this.progress.phase = "running";
@@ -282,6 +290,10 @@ function addUsage(left: WorkerUsage, right: WorkerUsage): WorkerUsage {
     totalTokens: left.totalTokens + right.totalTokens,
     ...(cost > 0 ? { cost } : {}),
   };
+}
+
+function nonEmptyUsage(usage: WorkerUsage): WorkerUsage | undefined {
+  return usage.totalTokens > 0 ? usage : undefined;
 }
 
 function cloneProgress(progress: WorkerProgress): WorkerProgress {

@@ -131,6 +131,9 @@ export class RalphOrchestrator {
 
     result.changedFiles = result.changedFiles.length > 0 ? result.changedFiles : await this.git.changedPaths();
     iteration.diff = await this.git.diffStats("HEAD", { excludePrefixes: [".ralph"], includeUntracked: true });
+    iteration.usage = result.usage;
+    iteration.summary = result.summary;
+    iteration.changedFiles = result.changedFiles;
     const latest = await this.store.readState(state.name);
     const externallyPaused = latest.control === "paused";
     const killed = /ralph-kill/i.test(result.verification.notes ?? "") || result.verification.commands.some((command) => /ralph-kill/i.test(command.summary));
@@ -157,6 +160,7 @@ export class RalphOrchestrator {
     options.onProgress?.({ state, message: `Finished Ralph iteration ${iterationNumber} with ${result.verification.status}` });
     await this.git.addAllAndCommit(`worker: iteration ${String(iterationNumber).padStart(3, "0")} changes`);
     await this.git.createRef(iteration.afterRef);
+    await options.onIterationComplete?.({ state, iteration, todo, result });
 
     return state;
   }

@@ -8,6 +8,7 @@ import test from "node:test";
 import { GitPolicy } from "../src/git.js";
 import { deriveLoopStatus, RalphOrchestrator, renderStatus } from "../src/orchestrator.js";
 import { parseLoopStateJson } from "../src/store.js";
+import { renderRalphWidget } from "../extensions/orchestrator.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -192,19 +193,107 @@ test("derived status reports needs attention for interrupted tasks", async (t) =
   assert.equal(deriveLoopStatus(state), "needs_attention");
 });
 
+test("completion callback is emitted before the next iteration starts", async (t) => {
+  const cwd = await createMathFixture();
+  t.after(() => fs.rm(cwd, { recursive: true, force: true }));
+  const ralph = new RalphOrchestrator(cwd);
+  await ralph.start({ name: "completion-demo", todos: ["Add subtract test and implementation", "Add multiply test and implementation"] });
+  const events: string[] = [];
+
+  await ralph.run("completion-demo", {
+    maxIterations: 2,
+    workerMode: "scripted",
+    onProgress(progress) {
+      if (progress.message.startsWith("Started Ralph iteration")) events.push(`start:${progress.state.currentIteration}`);
+    },
+    onIterationComplete(event) {
+      events.push(`complete:${event.iteration.number}:${event.result.verification.status}`);
+    },
+  });
+
+  assert.deepEqual(events, ["start:1", "complete:1:passed", "start:2", "complete:2:passed"]);
+});
+
+test("Ralph widget renders compact usage and omits successful verification text", () => {
+  const state = parseLoopStateJson(JSON.stringify({
+    name: "widget-demo",
+    control: "active",
+    branch: "orchestrator/widget-demo",
+    currentIteration: 1,
+    createdAt: "2026-05-27T00:00:00.000Z",
+    updatedAt: "2026-05-27T00:00:00.000Z",
+    todos: [{ id: 1, title: "Do work", status: "complete" }],
+    iterations: [{
+      number: 1,
+      status: "accepted",
+      todoId: 1,
+      beforeRef: "before",
+      startedAt: "2026-05-27T00:00:00.000Z",
+      completedAt: "2026-05-27T00:01:00.000Z",
+      verification: { status: "passed", commands: [{ command: "npm test", exitCode: 0, summary: "ok" }] },
+      diff: { filesChanged: 1, insertions: 1, deletions: 1 },
+      usage: { input: 50000, output: 30000, cacheRead: 6999, cacheWrite: 0, totalTokens: 86999, cost: 0.165567 },
+    }],
+  }));
+
+  const output = renderRalphWidget(state, undefined, plainTheme as never, 120).join("\n");
+  assert.match(output, /passed · \+1 \/ -1 · 1 files · 87\.0k tok · \$0\.1656/);
+  assert.doesNotMatch(output, /verification ok/);
+});
+
+test("Ralph widget renders verification problem markers", () => {
+  const state = parseLoopStateJson(JSON.stringify({
+    name: "widget-fail-demo",
+    control: "active",
+    branch: "orchestrator/widget-fail-demo",
+    currentIteration: 1,
+    createdAt: "2026-05-27T00:00:00.000Z",
+    updatedAt: "2026-05-27T00:00:00.000Z",
+    todos: [{ id: 1, title: "Do work", status: "failed" }],
+    iterations: [{
+      number: 1,
+      status: "failed",
+      todoId: 1,
+      beforeRef: "before",
+      startedAt: "2026-05-27T00:00:00.000Z",
+      completedAt: "2026-05-27T00:01:00.000Z",
+      verification: { status: "failed", commands: [{ command: "npm test", exitCode: 1, summary: "failed" }] },
+      diff: { filesChanged: 1, insertions: 1, deletions: 0 },
+    }],
+  }));
+
+  const output = renderRalphWidget(state, undefined, plainTheme as never, 120).join("\n");
+  assert.match(output, /failed · \+1 \/ -0 · 1 files · ✗ verification/);
+});
+
 test("parseLoopStateJson validates persisted state", () => {
   const state = parseLoopStateJson(JSON.stringify({
     name: "valid-demo",
     control: "active",
     branch: "orchestrator/valid-demo",
-    currentIteration: 0,
+    currentIteration: 1,
     createdAt: "2026-05-27T00:00:00.000Z",
     updatedAt: "2026-05-27T00:00:00.000Z",
-    todos: [{ id: 1, title: "Do work", status: "queued" }],
-    iterations: [],
+    todos: [{ id: 1, title: "Do work", status: "complete" }],
+    iterations: [{
+      number: 1,
+      status: "accepted",
+      todoId: 1,
+      beforeRef: "refs/ralph/valid-demo/iter-001-before",
+      afterRef: "refs/ralph/valid-demo/iter-001-after",
+      startedAt: "2026-05-27T00:00:00.000Z",
+      completedAt: "2026-05-27T00:01:00.000Z",
+      verification: { status: "passed", commands: [{ command: "npm test", exitCode: 0, summary: "ok" }] },
+      diff: { filesChanged: 1, insertions: 2, deletions: 0 },
+      usage: { input: 10, output: 5, cacheRead: 2, cacheWrite: 1, totalTokens: 18, cost: 0.1234 },
+      summary: "Did work.",
+      changedFiles: ["src/work.ts"],
+    }],
   }));
 
-  assert.equal(state.todos[0]?.status, "queued");
+  assert.equal(state.todos[0]?.status, "complete");
+  assert.equal(state.iterations[0]?.usage?.totalTokens, 18);
+  assert.deepEqual(state.iterations[0]?.changedFiles, ["src/work.ts"]);
   assert.throws(() => parseLoopStateJson("{", "bad-state.json"), /Invalid Ralph state JSON in bad-state\.json/);
   assert.throws(() => parseLoopStateJson(JSON.stringify({ name: "bad" }), "bad-state.json"), /required properties control/);
   assert.throws(() => parseLoopStateJson(JSON.stringify({
@@ -267,6 +356,15 @@ test("orchestrator artifacts are created under ignored .ralph/orchestrator", asy
   const trackedArtifacts = (await execFileAsync("git", ["ls-files", ".ralph", ".ralph-orchestrator"], { cwd })).stdout.trim();
   assert.equal(trackedArtifacts, "");
 });
+
+const plainTheme = {
+  fg(_color: string, text: string) {
+    return text;
+  },
+  bold(text: string) {
+    return text;
+  },
+};
 
 async function createMathFixture(): Promise<string> {
   const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "ralph-fixture-"));

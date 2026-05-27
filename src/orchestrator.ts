@@ -42,6 +42,7 @@ export class RalphOrchestrator {
   async pause(name: string): Promise<LoopState> {
     const state = await this.store.readState(slugifyLoopName(name));
     state.control = "paused";
+    deferQueuedTodos(state);
     await this.store.writeState(state);
     if (!state.iterations.some((iteration) => iteration.status === "running")) {
       await this.git.addAllAndCommit(`orchestrator: pause ${state.name}`);
@@ -144,6 +145,7 @@ export class RalphOrchestrator {
       iteration.status = result.verification.status === "passed" ? "accepted" : "failed";
       todo.status = result.verification.status === "passed" ? "complete" : "failed";
       state.control = externallyPaused ? "paused" : "active";
+      if (externallyPaused) deferQueuedTodos(state);
     }
 
     await this.store.writeWorkerArtifacts(state, iteration, result);
@@ -177,6 +179,12 @@ export class RalphOrchestrator {
 
 function slify(name: string): string {
   return slugifyLoopName(name);
+}
+
+function deferQueuedTodos(state: LoopState): void {
+  for (const todo of state.todos) {
+    if (todo.status === "queued") todo.status = "deferred";
+  }
 }
 
 function prepareRunScope(state: LoopState, max: number): void {

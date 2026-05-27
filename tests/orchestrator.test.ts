@@ -93,19 +93,46 @@ test("progress includes configured worker model", async (t) => {
   assert.ok(models.includes("test-provider/test-model:low"));
 });
 
-test("pause prevents queued work until run resumes it", async (t) => {
+test("pause defers queued work until run resumes it", async (t) => {
   const cwd = await createMathFixture();
   t.after(() => fs.rm(cwd, { recursive: true, force: true }));
   const ralph = new RalphOrchestrator(cwd);
-  await ralph.start({ name: "pause-demo", todos: ["Add subtract test and implementation"] });
+  await ralph.start({ name: "pause-demo", todos: ["Add subtract test and implementation", "Add multiply test and implementation"] });
 
   let state = await ralph.pause("pause-demo");
   assert.equal(state.control, "paused");
   assert.equal(deriveLoopStatus(state), "paused");
+  assert.deepEqual(state.todos.map((todo) => todo.status), ["deferred", "deferred"]);
 
   state = await ralph.run("pause-demo", { maxIterations: 1, workerMode: "scripted" });
   assert.equal(state.control, "active");
-  assert.equal(state.todos[0]?.status, "complete");
+  assert.deepEqual(state.todos.map((todo) => todo.status), ["complete", "deferred"]);
+});
+
+test("pausing a running loop defers remaining queued work in final state", async (t) => {
+  const cwd = await createMathFixture();
+  t.after(() => fs.rm(cwd, { recursive: true, force: true }));
+  const ralph = new RalphOrchestrator(cwd);
+  await ralph.start({
+    name: "pause-running-demo",
+    todos: ["Add subtract test and implementation", "Add multiply test and implementation", "Add divide test and implementation"],
+  });
+  let pausePromise: Promise<unknown> | undefined;
+
+  const state = await ralph.run("pause-running-demo", {
+    maxIterations: 3,
+    workerMode: "scripted",
+    onProgress(progress) {
+      if (!pausePromise && progress.state.todos.some((todo) => todo.status === "running")) {
+        pausePromise = ralph.pause("pause-running-demo");
+      }
+    },
+  });
+  assert.ok(pausePromise);
+  await pausePromise;
+
+  assert.equal(state.control, "paused");
+  assert.deepEqual(state.todos.map((todo) => todo.status), ["complete", "deferred", "deferred"]);
 });
 
 test("deferred tasks are not picked until a later run scope", async (t) => {

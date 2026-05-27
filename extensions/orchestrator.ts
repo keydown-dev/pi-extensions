@@ -407,7 +407,7 @@ export function renderRalphWidget(state: LoopState, worker: WorkerProgress | und
     const prefix = isRunning ? theme.fg("accent", "› ") : "  ";
     const icon = todoGlyph(todo.status);
     const iconColor = todo.status === "complete" ? "success" : todo.status === "failed" || todo.status === "interrupted" ? "error" : todo.status === "running" ? "accent" : "dim";
-    const titleColor = todo.status === "running" ? "accent" : todo.status === "queued" ? "text" : "muted";
+    const titleColor = todo.status === "running" ? "accent" : "text";
     lines.push(`${prefix}${theme.fg(iconColor, icon)} ${theme.fg(titleColor, `#${todo.id} ${todo.title}`)}`);
     lines.push(`  ${renderTodoDetail(todo.status, iteration, isRunning ? worker : undefined, theme)}`);
     lines.push("");
@@ -457,13 +457,11 @@ function renderTodoDetail(status: LoopState["todos"][number]["status"], iteratio
   }
 
   if (status === "complete" || status === "failed" || status === "interrupted") {
-    const verification = iteration?.verification?.status;
-    const result = status === "complete" ? theme.fg("success", "passed") : status === "interrupted" ? theme.fg("warning", "interrupted") : theme.fg("error", "failed");
-    const segments = [result];
-    if (iteration?.diff) segments.push(renderDiffStats(iteration.diff, theme));
-    if (iteration?.usage) segments.push(renderCompactUsage(iteration.usage, theme));
-    if (verification === "failed") segments.push(theme.fg("error", "✗ verification"));
-    if (verification === "not_run" || !verification) segments.push(theme.fg("error", "✗ verification not run"));
+    const segments: string[] = [];
+    const elapsed = renderIterationElapsed(iteration);
+    if (elapsed) segments.push(theme.fg("muted", elapsed));
+    segments.push(...renderUsageSegments(iteration?.usage, theme));
+    if (iteration?.diff) segments.push(...renderDiffSummarySegments(iteration.diff, theme));
     return segments.join(theme.fg("muted", " · "));
   }
 
@@ -475,10 +473,23 @@ function renderDiffStats(diff: NonNullable<LoopState["iterations"][number]["diff
   return [theme.fg("success", `+${diff.insertions}`), theme.fg("muted", " / "), theme.fg("error", `-${diff.deletions}`), theme.fg("muted", ` · ${diff.filesChanged} files`)].join("");
 }
 
-function renderCompactUsage(usage: WorkerUsage, theme: RalphTheme): string {
-  if (!usage.totalTokens) return "";
-  const cost = usage.cost && usage.cost > 0 ? ` · $${usage.cost.toFixed(4)}` : "";
-  return theme.fg("muted", `${formatTokenCount(usage.totalTokens)} tok${cost}`);
+function renderIterationElapsed(iteration: LoopState["iterations"][number] | undefined): string {
+  if (!iteration?.completedAt) return "";
+  const started = Date.parse(iteration.startedAt);
+  const completed = Date.parse(iteration.completedAt);
+  if (!Number.isFinite(started) || !Number.isFinite(completed)) return "";
+  return formatElapsed(completed - started);
+}
+
+function renderUsageSegments(usage: WorkerUsage | undefined, theme: RalphTheme): string[] {
+  if (!usage?.totalTokens) return [];
+  const segments = [theme.fg("muted", `${formatTokenCount(usage.totalTokens)} tok`)];
+  if (usage.cost && usage.cost > 0) segments.push(theme.fg("muted", `$${usage.cost.toFixed(4)}`));
+  return segments;
+}
+
+function renderDiffSummarySegments(diff: NonNullable<LoopState["iterations"][number]["diff"]>, theme: RalphTheme): string[] {
+  return [theme.fg("muted", `+${diff.insertions} / -${diff.deletions}`), theme.fg("muted", `${diff.filesChanged} files`)];
 }
 
 function renderContextUsage(worker: WorkerProgress, theme: RalphTheme): string {
@@ -538,14 +549,19 @@ function renderIterationSummary(event: IterationCompleteEvent): string {
     "",
     `Loop: ${state.name}`,
     `Task: #${todo.id} ${todo.title}`,
-    `Status: ${todo.status}`,
   ];
 
-  if (iteration.diff) lines.push(`Changed: ${plainDiffStats(iteration.diff)}`);
+  const elapsed = renderIterationElapsed(iteration);
+  if (elapsed) lines.push(`Elapsed: ${elapsed}`);
+  const usage = iteration.usage ?? result.usage;
+  if (usage?.totalTokens) lines.push(`Tokens: ${usage.totalTokens.toLocaleString()}`);
+  if (usage?.cost && usage.cost > 0) lines.push(`Cost: $${usage.cost.toFixed(4)}`);
+  if (iteration.diff) {
+    lines.push(`Files edited: ${iteration.diff.filesChanged}`);
+    lines.push(`Lines: +${iteration.diff.insertions} / -${iteration.diff.deletions}`);
+  }
   const files = iteration.changedFiles ?? result.changedFiles;
   if (files.length) lines.push("Files:", ...files.map((file) => `- ${file}`));
-  const usage = iteration.usage ?? result.usage;
-  if (usage?.totalTokens) lines.push(`Used: ${formatUsage(usage)}`);
 
   lines.push("Verification:");
   for (const command of result.verification.commands) {
@@ -554,10 +570,6 @@ function renderIterationSummary(event: IterationCompleteEvent): string {
   if (result.verification.notes) lines.push(`Notes: ${result.verification.notes}`);
   lines.push("", "Summary:", result.summary || "Worker did not provide a summary.");
   return lines.join("\n");
-}
-
-function plainDiffStats(diff: NonNullable<LoopState["iterations"][number]["diff"]>): string {
-  return `+${diff.insertions} / -${diff.deletions} · ${diff.filesChanged} files`;
 }
 
 function iterationArtifacts(state: LoopState): Record<string, string> {

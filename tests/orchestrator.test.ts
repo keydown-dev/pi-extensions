@@ -237,8 +237,8 @@ test("Ralph widget renders compact usage and omits successful verification text"
   }));
 
   const output = renderRalphWidget(state, undefined, plainTheme as never, 120).join("\n");
-  assert.match(output, /passed · \+1 \/ -1 · 1 files · 87\.0k tok · \$0\.1656/);
-  assert.doesNotMatch(output, /verification ok/);
+  assert.match(output, /1m 0s · 87\.0k tok · \$0\.1656 · \+1 \/ -1 · 1 files/);
+  assert.doesNotMatch(output, /passed|verification ok/);
 });
 
 test("Ralph widget renders verification problem markers", () => {
@@ -263,7 +263,8 @@ test("Ralph widget renders verification problem markers", () => {
   }));
 
   const output = renderRalphWidget(state, undefined, plainTheme as never, 120).join("\n");
-  assert.match(output, /failed · \+1 \/ -0 · 1 files · ✗ verification/);
+  assert.match(output, /1m 0s · \+1 \/ -0 · 1 files/);
+  assert.doesNotMatch(output, /failed|verification/);
 });
 
 test("parseLoopStateJson validates persisted state", () => {

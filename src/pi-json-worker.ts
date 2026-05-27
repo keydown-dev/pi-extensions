@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
 import type { VerificationRecord, WorkerInput, WorkerProgress, WorkerResult, WorkerUsage } from "./types.js";
 
 export class PiJsonWorkerRunner {
@@ -15,7 +15,7 @@ export class PiJsonWorkerRunner {
     await appendJson(outputPath, { type: "worker_start", runner: "pi-json", timestamp: new Date().toISOString() });
     tracker.mark("starting", "worker_start");
     tracker.startHeartbeat();
-    const { exitCode, stderr } = await runPiJson(input.cwd, prompt, outputPath, input.workerModel, (event) => tracker.record(event));
+    const { exitCode, stderr, killed } = await runPiJson(input.cwd, prompt, outputPath, input.workerModel, input.state.name, (event) => tracker.record(event));
     tracker.stopHeartbeat();
     await appendJson(outputPath, { type: "worker_exit", exitCode, stderr, timestamp: new Date().toISOString() });
     tracker.mark("exited", "worker_exit");
@@ -26,7 +26,8 @@ export class PiJsonWorkerRunner {
         changedFiles: [],
         verification: {
           status: "failed",
-          commands: [{ command: "pi --mode json <ralph-pickup>", exitCode, summary: stderr || "Worker process failed" }],
+          commands: [{ command: "pi --mode json <ralph-pickup>", exitCode, summary: killed ? "Worker process killed by ralph-kill" : stderr || "Worker process failed" }],
+          notes: killed ? "Worker was killed by ralph-kill. Partial edits may remain; inspect git status before resuming." : undefined,
         },
       };
     }
@@ -76,10 +77,31 @@ Important constraints:
   }
 }
 
-async function runPiJson(cwd: string, prompt: string, outputPath: string, workerModel?: string, onEvent?: (event: unknown) => void): Promise<{ exitCode: number; stderr: string }> {
+const activeWorkerProcesses = new Map<string, Set<ChildProcess>>();
+const killedWorkerLoops = new Set<string>();
+
+export function killRalphWorkerProcesses(loopName?: string): number {
+  const entries = loopName ? [[loopName, activeWorkerProcesses.get(loopName)] as const] : [...activeWorkerProcesses.entries()];
+  let killed = 0;
+  for (const [entryLoopName, processes] of entries) {
+    if (!processes) continue;
+    for (const child of processes) {
+      if (child.killed || child.exitCode !== null) continue;
+      killedWorkerLoops.add(entryLoopName);
+      child.kill("SIGTERM");
+      killed += 1;
+    }
+  }
+  return killed;
+}
+
+async function runPiJson(cwd: string, prompt: string, outputPath: string, workerModel: string | undefined, loopName: string, onEvent?: (event: unknown) => void): Promise<{ exitCode: number; stderr: string; killed: boolean }> {
   return new Promise((resolve, reject) => {
     const args = ["--mode", "json", ...(workerModel ? ["--model", workerModel] : []), prompt];
     const child = spawn("pi", args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
+    const processes = activeWorkerProcesses.get(loopName) ?? new Set<ChildProcess>();
+    processes.add(child);
+    activeWorkerProcesses.set(loopName, processes);
     let stderr = "";
     let buffered = "";
     let settled = false;
@@ -126,13 +148,13 @@ async function runPiJson(cwd: string, prompt: string, outputPath: string, worker
       stderr += chunk.toString();
     });
     child.on("error", (error) => {
-      clearInterval(killTimer);
-      settled = true;
+      processes.delete(child);
+      if (processes.size === 0) activeWorkerProcesses.delete(loopName);
       reject(error);
     });
     child.on("close", (code) => {
-      clearInterval(killTimer);
-      settled = true;
+      processes.delete(child);
+      if (processes.size === 0) activeWorkerProcesses.delete(loopName);
       const trimmed = buffered.trim();
       if (trimmed) {
         try {
@@ -141,7 +163,8 @@ async function runPiJson(cwd: string, prompt: string, outputPath: string, worker
           // Ignore malformed tail; it is still preserved in worker-output.jsonl.
         }
       }
-      resolve({ exitCode: code ?? 1, stderr: stderr.trim() });
+      const killed = killedWorkerLoops.delete(loopName) || killedWorkerLoops.delete("*");
+      resolve({ exitCode: code ?? 1, stderr: stderr.trim(), killed });
     });
   });
 }

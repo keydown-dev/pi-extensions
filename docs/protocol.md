@@ -36,3 +36,9 @@ Loop artifacts live under `.ralph/orchestrator/loops/<loop>/`. Projects should u
 ## Runner boundary
 
 The default `pi-json` runner spawns a fresh `pi --mode json` worker process. The deterministic `scripted` runner is retained for local tests and writes the same artifacts.
+
+## Loop control semantics
+
+- `stop` / pause is soft: the loop state becomes `stopped`. If a worker process is already running, it is allowed to finish the active iteration, and the orchestrator does not start another iteration.
+- `resume` marks a stopped loop `ready`. It does not resume a child `pi --mode json` process; use `next` or `run` to start a fresh worker iteration.
+- `kill` is hard: the orchestrator sends `SIGTERM` to active Ralph child worker processes for that loop and leaves the loop stopped. The killed child session cannot be resumed in-place. Inspect `ralph status` and `git status`; reset/clean unwanted partial edits before resuming if necessary.

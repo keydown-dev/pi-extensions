@@ -7,6 +7,7 @@ import type { LoopState, OrchestratorProgress, WorkerMode, WorkerProgress, Worke
 
 let currentLoop: string | null = null;
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const activeJobs = new Map<string, Promise<void>>();
 
 export default function (pi: ExtensionAPI) {
   function setCurrent(ctx: ExtensionContext, state: LoopState | null): void {
@@ -59,8 +60,16 @@ export default function (pi: ExtensionAPI) {
     const name = splitArgs(args).shift() ?? currentLoop;
     if (!name) throw new Error("Usage: /ralph-stop [name]");
     const state = await new RalphOrchestrator(ctx.cwd, packageRoot).stop(name);
-    setCurrent(ctx, null);
-    ctx.ui.notify(`Stopped Ralph loop: ${state.name}`, "info");
+    updateUI(ctx, state);
+    ctx.ui.notify(activeJobs.has(state.name) ? `Stopping Ralph loop after the current worker exits: ${state.name}` : `Stopped Ralph loop: ${state.name}`, "info");
+  }
+
+  async function killLoop(args: string, ctx: ExtensionContext): Promise<void> {
+    const name = splitArgs(args).shift() ?? currentLoop;
+    if (!name) throw new Error("Usage: /ralph-kill [name]");
+    const { state, killed } = await new RalphOrchestrator(ctx.cwd, packageRoot).kill(name);
+    updateUI(ctx, state);
+    ctx.ui.notify(`Killed ${killed} Ralph worker process${killed === 1 ? "" : "es"} for ${state.name}. Inspect status before resuming.`, killed > 0 ? "warning" : "info");
   }
 
   async function showStatus(args: string, ctx: ExtensionContext): Promise<void> {
@@ -89,18 +98,42 @@ export default function (pi: ExtensionAPI) {
     const argv = splitArgs(args);
     const name = argv.shift() ?? currentLoop;
     if (!name) throw new Error("Usage: /ralph-next [name] [--runner pi-json] [--model MODEL]");
-    const state = await new RalphOrchestrator(ctx.cwd, packageRoot).next(name, { workerMode: parseRunner(argv), workerModel: parseModel(argv), onProgress: commandProgress(ctx) });
-    setCurrent(ctx, state.status === "ready" || state.status === "running" ? state : null);
-    ctx.ui.notify(`Ralph iteration ${state.currentIteration} finished with status ${state.status}`, "info");
+    startBackgroundLoop(ctx, name, `Ralph iteration for ${name}`, async () => {
+      const state = await new RalphOrchestrator(ctx.cwd, packageRoot).next(name, { workerMode: parseRunner(argv), workerModel: parseModel(argv), onProgress: commandProgress(ctx) });
+      return { state, message: `Ralph iteration ${state.currentIteration} finished with status ${state.status}` };
+    });
   }
 
   async function runLoop(args: string, ctx: ExtensionContext): Promise<void> {
     const argv = splitArgs(args);
     const name = argv.shift() ?? currentLoop;
     if (!name) throw new Error("Usage: /ralph-run [name] [--max N] [--runner pi-json] [--model MODEL]");
-    const state = await new RalphOrchestrator(ctx.cwd, packageRoot).run(name, { maxIterations: parseMax(argv) ?? 1, workerMode: parseRunner(argv), workerModel: parseModel(argv), onProgress: commandProgress(ctx) });
-    setCurrent(ctx, state.status === "ready" || state.status === "running" ? state : null);
-    ctx.ui.notify(`Ralph run stopped at ${state.currentIteration} (${state.status})`, "info");
+    const maxIterations = parseMax(argv) ?? 1;
+    startBackgroundLoop(ctx, name, `Ralph run for ${name}`, async () => {
+      const state = await new RalphOrchestrator(ctx.cwd, packageRoot).run(name, { maxIterations, workerMode: parseRunner(argv), workerModel: parseModel(argv), onProgress: commandProgress(ctx) });
+      return { state, message: `Ralph run stopped at ${state.currentIteration} (${state.status})` };
+    });
+  }
+
+  function startBackgroundLoop(ctx: ExtensionContext, name: string, label: string, execute: () => Promise<{ state: LoopState; message: string }>): void {
+    if (activeJobs.has(name)) {
+      ctx.ui.notify(`Ralph loop is already running: ${name}`, "warning");
+      return;
+    }
+    currentLoop = name;
+    const job = execute()
+      .then(({ state, message }) => {
+        setCurrent(ctx, state.status === "ready" || state.status === "running" ? state : state.status === "stopped" ? state : null);
+        ctx.ui.notify(message, "info");
+      })
+      .catch((error) => {
+        ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
+      })
+      .finally(() => {
+        activeJobs.delete(name);
+      });
+    activeJobs.set(name, job);
+    ctx.ui.notify(`${label} started in the background. You can keep chatting; progress will update in the Ralph widget.`, "info");
   }
 
   pi.registerCommand("ralph-start", {
@@ -119,6 +152,17 @@ export default function (pi: ExtensionAPI) {
     handler: async (args, ctx) => {
       try {
         await stopLoop(args, ctx);
+      } catch (error) {
+        ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
+      }
+    },
+  });
+
+  pi.registerCommand("ralph-kill", {
+    description: "Kill active Ralph worker process and stop the loop",
+    handler: async (args, ctx) => {
+      try {
+        await killLoop(args, ctx);
       } catch (error) {
         ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
       }
@@ -222,6 +266,11 @@ export default function (pi: ExtensionAPI) {
           return;
         }
 
+        if (subcommand === "kill") {
+          await killLoop(argv.join(" "), ctx);
+          return;
+        }
+
         if (subcommand === "status") {
           await showStatus(argv.join(" "), ctx);
           return;
@@ -303,14 +352,23 @@ export default function (pi: ExtensionAPI) {
       runner: Type.Optional(Type.String({ description: "Worker runner: pi-json (default) or scripted." })),
       model: Type.Optional(Type.String({ description: "Pi model pattern/ID for the child worker, e.g. openai/gpt-4o or sonnet:high." })),
     }),
-    async execute(_toolCallId, params, _signal, onUpdate, ctx) {
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const name = params.name ?? currentLoop;
       if (!name) throw new Error("No Ralph loop name provided and no active loop is set.");
-      const state = await new RalphOrchestrator(ctx.cwd, packageRoot).next(name, { workerMode: parseRunnerValue(params.runner), workerModel: params.model, onProgress: toolProgress(ctx, onUpdate) });
-      setCurrent(ctx, state.status === "ready" || state.status === "running" ? state : null);
+      if (activeJobs.has(name)) throw new Error(`Ralph loop is already running: ${name}`);
+      currentLoop = name;
+      const job = new RalphOrchestrator(ctx.cwd, packageRoot)
+        .next(name, { workerMode: parseRunnerValue(params.runner), workerModel: params.model, onProgress: commandProgress(ctx) })
+        .then((state) => {
+          setCurrent(ctx, state.status === "ready" || state.status === "running" ? state : state.status === "stopped" ? state : null);
+          ctx.ui.notify(`Ralph iteration ${state.currentIteration} finished with status ${state.status}`, "info");
+        })
+        .catch((error) => ctx.ui.notify(error instanceof Error ? error.message : String(error), "error"))
+        .finally(() => activeJobs.delete(name));
+      activeJobs.set(name, job);
       return {
-        content: [{ type: "text", text: renderToolResponse(state, `Ran Ralph iteration ${state.currentIteration} for "${state.name}".`) }],
-        details: { state, nextAction: nextActionForState(state), artifacts: iterationArtifacts(state) },
+        content: [{ type: "text", text: `Started Ralph iteration for "${name}" in the background. You can keep chatting; progress will update in the Ralph widget.` }],
+        details: { state: { name, status: "running" }, nextAction: `Continue chatting normally, or use /ralph-stop ${name} to stop after the current worker exits.` },
       };
     },
   });
@@ -330,14 +388,89 @@ export default function (pi: ExtensionAPI) {
       runner: Type.Optional(Type.String({ description: "Worker runner: pi-json (default) or scripted." })),
       model: Type.Optional(Type.String({ description: "Pi model pattern/ID for the child worker, e.g. openai/gpt-4o or sonnet:high." })),
     }),
-    async execute(_toolCallId, params, _signal, onUpdate, ctx) {
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const name = params.name ?? currentLoop;
       if (!name) throw new Error("No Ralph loop name provided and no active loop is set.");
-      const state = await new RalphOrchestrator(ctx.cwd, packageRoot).run(name, { maxIterations: params.maxIterations ?? 1, workerMode: parseRunnerValue(params.runner), workerModel: params.model, onProgress: toolProgress(ctx, onUpdate) });
-      setCurrent(ctx, state.status === "ready" || state.status === "running" ? state : null);
+      if (activeJobs.has(name)) throw new Error(`Ralph loop is already running: ${name}`);
+      currentLoop = name;
+      const maxIterations = params.maxIterations ?? 1;
+      const job = new RalphOrchestrator(ctx.cwd, packageRoot)
+        .run(name, { maxIterations, workerMode: parseRunnerValue(params.runner), workerModel: params.model, onProgress: commandProgress(ctx) })
+        .then((state) => {
+          setCurrent(ctx, state.status === "ready" || state.status === "running" ? state : state.status === "stopped" ? state : null);
+          ctx.ui.notify(`Ralph run stopped at ${state.currentIteration} (${state.status})`, "info");
+        })
+        .catch((error) => ctx.ui.notify(error instanceof Error ? error.message : String(error), "error"))
+        .finally(() => activeJobs.delete(name));
+      activeJobs.set(name, job);
       return {
-        content: [{ type: "text", text: renderToolResponse(state, `Ralph run stopped at iteration ${state.currentIteration} for "${state.name}".`) }],
-        details: { state, nextAction: nextActionForState(state), artifacts: iterationArtifacts(state) },
+        content: [{ type: "text", text: `Started Ralph run for "${name}" in the background. You can keep chatting; progress will update in the Ralph widget.` }],
+        details: { state: { name, status: "running", maxIterations }, nextAction: `Continue chatting normally, or use /ralph-stop ${name} to stop after the current worker exits.` },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "ralph_orchestrator_stop",
+    label: "Stop Ralph Loop",
+    description: "Pause/stop a Ralph loop after the current worker iteration exits. Does not kill the active child process.",
+    promptSnippet: "Stop or pause the active Ralph loop after the current worker exits.",
+    parameters: Type.Object({
+      name: Type.Optional(Type.String({ description: "Loop name. Defaults to the current active loop when available." })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const name = params.name ?? currentLoop;
+      if (!name) throw new Error("No Ralph loop name provided and no active loop is set.");
+      const state = await new RalphOrchestrator(ctx.cwd, packageRoot).stop(name);
+      updateUI(ctx, state);
+      return {
+        content: [{ type: "text", text: renderToolResponse(state, activeJobs.has(state.name) ? `Ralph loop \"${state.name}\" will stop after the current worker exits.` : `Stopped Ralph loop \"${state.name}\".`) }],
+        details: { state, nextAction: nextActionForState(state) },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "ralph_orchestrator_resume",
+    label: "Resume Ralph Loop",
+    description: "Resume a stopped Ralph loop by setting it back to ready. The next/run tool starts the next worker iteration.",
+    promptSnippet: "Resume a stopped Ralph loop after checking status and any partial work.",
+    parameters: Type.Object({
+      name: Type.Optional(Type.String({ description: "Loop name. Defaults to the current active loop when available." })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const name = params.name ?? currentLoop;
+      if (!name) throw new Error("No Ralph loop name provided and no active loop is set.");
+      const state = await new RalphOrchestrator(ctx.cwd, packageRoot).resume(name);
+      setCurrent(ctx, state);
+      return {
+        content: [{ type: "text", text: renderToolResponse(state, `Resumed Ralph loop \"${state.name}\". It is ready; no worker was started.`) }],
+        details: { state, nextAction: nextActionForState(state) },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "ralph_orchestrator_kill",
+    label: "Kill Ralph Worker",
+    description: "Kill active child Pi worker processes for a Ralph loop, then leave the loop stopped for inspection/recovery.",
+    promptSnippet: "Kill the active Ralph worker only when the user asks for an immediate stop/abort/kill.",
+    promptGuidelines: [
+      "Use ralph_orchestrator_kill only for immediate abort/kill requests, not ordinary pause/stop requests.",
+      "After killing, inspect status and git status before resuming; partial worker edits may remain in the worktree.",
+      "A killed child Pi process cannot be resumed. Resume the Ralph loop by cleaning up or accepting partial work, then starting a new iteration.",
+    ],
+    parameters: Type.Object({
+      name: Type.Optional(Type.String({ description: "Loop name. Defaults to the current active loop when available." })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const name = params.name ?? currentLoop;
+      if (!name) throw new Error("No Ralph loop name provided and no active loop is set.");
+      const { state, killed } = await new RalphOrchestrator(ctx.cwd, packageRoot).kill(name);
+      updateUI(ctx, state);
+      return {
+        content: [{ type: "text", text: `${killed > 0 ? "Killed" : "No active worker process found for"} Ralph loop \"${state.name}\" (${killed} process${killed === 1 ? "" : "es"}).\n\nInspect status and git status before resuming; partial edits may remain.` }],
+        details: { state, killed, nextAction: "Inspect ralph_orchestrator_status and git status. If partial edits are unwanted, reset/clean them before ralph_orchestrator_resume and ralph_orchestrator_run." },
       };
     },
   });
@@ -388,10 +521,10 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("input", async (event) => {
     if (event.source === "extension") return { action: "continue" as const };
-    if (/\bralph\b/i.test(event.text) && /\b(loop|loops|iterate|iterations|issues?)\b/i.test(event.text) && !event.text.startsWith("/")) {
+    if (/\bralph\b/i.test(event.text) && /\b(loop|loops|iterate|iterations|issues?|pause|resume|stop|kill|abort)\b/i.test(event.text) && !event.text.startsWith("/")) {
       return {
         action: "transform" as const,
-        text: `${event.text}\n\nIf this is a request to create or manage a Ralph loop, use the ralph_orchestrator_start, ralph_orchestrator_next, ralph_orchestrator_run, ralph_orchestrator_status, or ralph_orchestrator_list tools as appropriate.`,
+        text: `${event.text}\n\nIf this is a request to create, manage, pause, resume, stop, kill, or inspect a Ralph loop, use the ralph_orchestrator_start, ralph_orchestrator_next, ralph_orchestrator_run, ralph_orchestrator_stop, ralph_orchestrator_resume, ralph_orchestrator_kill, ralph_orchestrator_status, or ralph_orchestrator_list tools as appropriate.`,
       };
     }
     return { action: "continue" as const };
@@ -410,7 +543,8 @@ const HELP = `Ralph Orchestrator - fresh-context development loops
 Primary commands:
   /ralph-plan <goal>                               Plan/grill a loop before starting
   /ralph-start <name> [--max N] [--todo item ...]  Start a loop
-  /ralph-stop [name]                               Stop current loop
+  /ralph-stop [name]                               Stop after the current worker exits
+  /ralph-kill [name]                               Kill the current Ralph worker process and stop
   /ralph-status [name]                             Show current or named loop status
   /ralph-list                                      List all loops
   /ralph-next [name] [--runner pi-json] [--model MODEL]          Run one fresh Pi worker iteration
@@ -419,10 +553,12 @@ Primary commands:
 Other commands:
   /ralph plan <goal>                               Alias for /ralph-plan
   /ralph resume <name>                             Resume stopped loop
+  /ralph kill [name]                               Alias for /ralph-kill
 
 Compatibility aliases:
   /ralph start <name> [--max N]
   /ralph stop [name]
+  /ralph kill [name]
   /ralph next [name]
   /ralph run [name] [--max N]
 
@@ -510,7 +646,7 @@ function renderRalphWidget(state: LoopState, worker: WorkerProgress | undefined,
   }
 
   lines.push(rule);
-  lines.push(theme.fg("dim", "Esc pause · /ralph-stop stop loop · /ralph-status refresh"));
+  lines.push(theme.fg("dim", "Chat to pause, resume, stop, or steer Ralph · /ralph-kill kills the active worker"));
   return lines.map((line) => truncateAnsiToWidth(line, width));
 }
 

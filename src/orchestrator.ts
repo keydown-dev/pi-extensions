@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { afterRef, beforeRef, GitPolicy, orchestrationBranch } from "./git.js";
 import { slugifyLoopName } from "./paths.js";
-import { PiJsonWorkerRunner } from "./pi-json-worker.js";
+import { killRalphWorkerProcesses, PiJsonWorkerRunner } from "./pi-json-worker.js";
 import { ScriptedMathWorker } from "./scripted-worker.js";
 import { RalphStore } from "./store.js";
 import type { IterationState, LoopState, RunOptions, StartOptions, WorkerProgress } from "./types.js";
@@ -44,7 +44,12 @@ export class RalphOrchestrator {
     if (state.status === "completed") return state;
     state.status = "stopped";
     await this.store.writeState(state);
-    await this.git.addAllAndCommit(`orchestrator: stop ${state.name}`);
+    // If a worker is currently running, do not touch git here: the child process may
+    // have in-flight code changes. The active iteration will observe the stopped
+    // state after the worker exits and avoid continuing the loop.
+    if (!state.iterations.some((iteration) => iteration.status === "running")) {
+      await this.git.addAllAndCommit(`orchestrator: stop ${state.name}`);
+    }
     return state;
   }
 
@@ -52,9 +57,24 @@ export class RalphOrchestrator {
     const state = await this.store.readState(slugifyLoopName(name));
     if (state.status === "completed") throw new Error(`Loop is completed: ${state.name}`);
     state.status = "ready";
+    for (const todo of state.todos) {
+      if (todo.status === "running") todo.status = "pending";
+    }
+    for (const iteration of state.iterations) {
+      if (iteration.status === "running") {
+        iteration.status = "aborted";
+        iteration.completedAt = new Date().toISOString();
+      }
+    }
     await this.store.writeState(state);
     await this.git.addAllAndCommit(`orchestrator: resume ${state.name}`);
     return state;
+  }
+
+  async kill(name: string): Promise<{ state: LoopState; killed: number }> {
+    const state = await this.stop(name);
+    const killed = killRalphWorkerProcesses(state.name);
+    return { state, killed };
   }
 
   async next(name: string, options: RunOptions = {}): Promise<LoopState> {
@@ -112,12 +132,16 @@ export class RalphOrchestrator {
     result.changedFiles = result.changedFiles.length > 0 ? result.changedFiles : await this.git.changedPaths();
     iteration.diff = await this.git.diffStats("HEAD", { excludePrefixes: [".ralph"], includeUntracked: true, includePaths: result.changedFiles });
 
+    const externallyStopped = (await this.store.readState(state.name)).status === "stopped";
+
+    const killed = /ralph-kill/i.test(result.verification.notes ?? "") || result.verification.commands.some((command) => /ralph-kill/i.test(command.summary));
+
     iteration.verification = result.verification;
-    iteration.status = result.verification.status === "passed" ? "accepted" : "failed";
+    iteration.status = killed ? "aborted" : result.verification.status === "passed" ? "accepted" : "failed";
     iteration.afterRef = afterRef(state.name, iterationNumber);
     iteration.completedAt = new Date().toISOString();
-    todo.status = result.verification.status === "passed" ? "completed" : "failed";
-    state.status = result.verification.status === "passed" ? "ready" : "failed";
+    todo.status = killed ? "pending" : result.verification.status === "passed" ? "completed" : "failed";
+    state.status = externallyStopped ? "stopped" : result.verification.status === "passed" ? "ready" : "failed";
 
     await this.store.writeWorkerArtifacts(state, iteration, result);
     await fs.writeFile(path.join(this.store.getIterationDir(state.name, iterationNumber), "git-after.txt"), await this.git.captureStatus(), "utf8");

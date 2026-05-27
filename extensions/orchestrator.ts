@@ -477,7 +477,7 @@ function formatTokenCount(tokens: number): string {
 }
 
 function spinnerFrame(elapsedMs = Date.now()): string {
-  return SPINNER_FRAMES[Math.floor(elapsedMs / 120) % SPINNER_FRAMES.length] ?? "⠋";
+  return SPINNER_FRAMES[Math.floor(elapsedMs / 80) % SPINNER_FRAMES.length] ?? "⠋";
 }
 
 function todoGlyph(status: LoopState["todos"][number]["status"], elapsedMs?: number): string {

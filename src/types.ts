@@ -1,6 +1,7 @@
-export type LoopStatus = "ready" | "running" | "awaiting_acceptance" | "completed" | "failed" | "stopped";
+export type LoopControl = "active" | "paused";
+export type DerivedLoopStatus = "running" | "paused" | "needs_attention" | "completed" | "ready";
 export type IterationStatus = "planned" | "running" | "candidate" | "accepted" | "rejected" | "failed" | "aborted";
-export type TodoStatus = "pending" | "running" | "completed" | "failed";
+export type TodoStatus = "queued" | "running" | "complete" | "deferred" | "failed" | "interrupted";
 
 export interface RalphTodo {
   id: number;
@@ -39,7 +40,7 @@ export interface IterationState {
 
 export interface LoopState {
   name: string;
-  status: LoopStatus;
+  control: LoopControl;
   branch: string;
   currentIteration: number;
   createdAt: string;

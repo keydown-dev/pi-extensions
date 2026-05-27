@@ -6,7 +6,8 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import test from "node:test";
 import { GitPolicy } from "../src/git.js";
-import { RalphOrchestrator, renderStatus } from "../src/orchestrator.js";
+import { deriveLoopStatus, RalphOrchestrator, renderStatus } from "../src/orchestrator.js";
+import { parseLoopStateJson } from "../src/store.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -16,14 +17,15 @@ test("scripted Ralph loop adds tests and implementations over three iterations",
   const ralph = new RalphOrchestrator(cwd);
 
   let state = await ralph.start({ name: "math-kata" });
-  assert.equal(state.status, "ready");
+  assert.equal(state.control, "active");
+  assert.equal(deriveLoopStatus(state), "ready");
   assert.equal(state.todos.length, 3);
 
   state = await ralph.run("math-kata", { maxIterations: 3, workerMode: "scripted" });
 
   assert.equal(state.currentIteration, 3);
-  assert.equal(state.status, "completed");
-  assert.equal(state.todos.filter((todo) => todo.status === "completed").length, 3);
+  assert.equal(deriveLoopStatus(state), "completed");
+  assert.equal(state.todos.filter((todo) => todo.status === "complete").length, 3);
   assert.equal(state.iterations.length, 3);
   assert.ok(state.iterations.every((iteration) => iteration.status === "accepted"));
   assert.ok(state.iterations.every((iteration) => iteration.diff && iteration.diff.filesChanged >= 1));
@@ -61,7 +63,8 @@ test("run emits progress with running todo before worker completes", async (t) =
   await ralph.start({ name: "progress-demo", todos: ["Add subtract test and implementation"] });
   const progressMessages: string[] = [];
 
-  await ralph.next("progress-demo", {
+  await ralph.run("progress-demo", {
+    maxIterations: 1,
     workerMode: "scripted",
     onProgress(progress) {
       progressMessages.push(renderStatus(progress.state));
@@ -78,7 +81,8 @@ test("progress includes configured worker model", async (t) => {
   await ralph.start({ name: "model-progress", todos: ["Add subtract test and implementation"] });
   const models: Array<string | undefined> = [];
 
-  await ralph.next("model-progress", {
+  await ralph.run("model-progress", {
+    maxIterations: 1,
     workerMode: "scripted",
     workerModel: "test-provider/test-model:low",
     onProgress(progress) {
@@ -87,6 +91,73 @@ test("progress includes configured worker model", async (t) => {
   });
 
   assert.ok(models.includes("test-provider/test-model:low"));
+});
+
+test("pause prevents queued work until run resumes it", async (t) => {
+  const cwd = await createMathFixture();
+  t.after(() => fs.rm(cwd, { recursive: true, force: true }));
+  const ralph = new RalphOrchestrator(cwd);
+  await ralph.start({ name: "pause-demo", todos: ["Add subtract test and implementation"] });
+
+  let state = await ralph.pause("pause-demo");
+  assert.equal(state.control, "paused");
+  assert.equal(deriveLoopStatus(state), "paused");
+
+  state = await ralph.run("pause-demo", { maxIterations: 1, workerMode: "scripted" });
+  assert.equal(state.control, "active");
+  assert.equal(state.todos[0]?.status, "complete");
+});
+
+test("deferred tasks are not picked until a later run scope", async (t) => {
+  const cwd = await createMathFixture();
+  t.after(() => fs.rm(cwd, { recursive: true, force: true }));
+  const ralph = new RalphOrchestrator(cwd);
+  let state = await ralph.start({ name: "deferred-demo", maxIterations: 1 });
+  assert.deepEqual(state.todos.map((todo) => todo.status), ["queued", "deferred", "deferred"]);
+
+  state = await ralph.run("deferred-demo", { maxIterations: 1, workerMode: "scripted" });
+  assert.deepEqual(state.todos.map((todo) => todo.status), ["complete", "deferred", "deferred"]);
+  assert.equal(deriveLoopStatus(state), "ready");
+
+  state = await ralph.run("deferred-demo", { maxIterations: 1, workerMode: "scripted" });
+  assert.deepEqual(state.todos.map((todo) => todo.status), ["complete", "complete", "deferred"]);
+});
+
+test("derived status reports needs attention for interrupted tasks", async (t) => {
+  const cwd = await createMathFixture();
+  t.after(() => fs.rm(cwd, { recursive: true, force: true }));
+  const ralph = new RalphOrchestrator(cwd);
+  const state = await ralph.start({ name: "interrupted-demo", todos: ["Add subtract test and implementation"] });
+  state.todos[0]!.status = "interrupted";
+
+  assert.equal(deriveLoopStatus(state), "needs_attention");
+});
+
+test("parseLoopStateJson validates persisted state", () => {
+  const state = parseLoopStateJson(JSON.stringify({
+    name: "valid-demo",
+    control: "active",
+    branch: "orchestrator/valid-demo",
+    currentIteration: 0,
+    createdAt: "2026-05-27T00:00:00.000Z",
+    updatedAt: "2026-05-27T00:00:00.000Z",
+    todos: [{ id: 1, title: "Do work", status: "queued" }],
+    iterations: [],
+  }));
+
+  assert.equal(state.todos[0]?.status, "queued");
+  assert.throws(() => parseLoopStateJson("{", "bad-state.json"), /Invalid Ralph state JSON in bad-state\.json/);
+  assert.throws(() => parseLoopStateJson(JSON.stringify({ name: "bad" }), "bad-state.json"), /required properties control/);
+  assert.throws(() => parseLoopStateJson(JSON.stringify({
+    name: "bad-status",
+    control: "active",
+    branch: "orchestrator/bad-status",
+    currentIteration: 0,
+    createdAt: "2026-05-27T00:00:00.000Z",
+    updatedAt: "2026-05-27T00:00:00.000Z",
+    todos: [{ id: 1, title: "Do work", status: "pending" }],
+    iterations: [],
+  }), "bad-state.json"), /bad-state\.json\.todos\[0\]\.status/);
 });
 
 test("changedPaths preserves leading-space porcelain paths", async (t) => {

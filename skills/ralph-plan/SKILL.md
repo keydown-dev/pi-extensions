@@ -99,7 +99,7 @@ Potential locations:
 7. Ask for approval or changes.
 8. Only after approval, call `ralph_orchestrator_start`.
 9. Tell the user the loop is ready but not executing yet.
-10. If the user wants to proceed and tools are available, use `ralph_orchestrator_next` for one iteration or `ralph_orchestrator_run` for a bounded run; otherwise tell them to use `/ralph-next <name>` or `/ralph-run <name> --max N`.
+10. If the user wants to proceed and tools are available, use `ralph_orchestrator_run` for a bounded run; for one iteration use `maxIterations: 1`. Otherwise tell them to use `/ralph-run <name> --max N`.
 11. Use `ralph_orchestrator_status` or `ralph_orchestrator_list` to inspect progress instead of reading extension code.
 
 ## Suggested questions
@@ -166,4 +166,4 @@ When the user approves:
 1. Call `ralph_orchestrator_start`.
 2. Report that the loop was created, where artifacts live (`.ralph/orchestrator/loops/<name>/`), and that no worker has run yet.
 3. Ask whether to run one iteration, run up to the approved max, or stop at prepared state.
-4. If asked to run, prefer `ralph_orchestrator_next`/`ralph_orchestrator_run` over slash commands. Use slash commands only when the corresponding agent tool is unavailable.
+4. If asked to run, prefer `ralph_orchestrator_run` over slash commands. Use `maxIterations: 1` for one iteration. Use slash commands only when the corresponding agent tool is unavailable.

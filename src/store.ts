@@ -1,6 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { IterationState, LoopState, RalphTodo, VerificationRecord } from "./types.js";
+import { Type } from "typebox";
+import { Value } from "typebox/value";
+import type { IterationState, LoopState, RalphTodo, TodoStatus, VerificationRecord } from "./types.js";
 import { ROOT_DIR, iterationDir, loopDir, statePath, slugifyLoopName } from "./paths.js";
 
 export class RalphStore {
@@ -27,13 +29,13 @@ export class RalphStore {
     const now = new Date().toISOString();
     const state: LoopState = {
       name: slugifyLoopName(name),
-      status: "ready",
+      control: "active",
       branch,
       currentIteration: 0,
       createdAt: now,
       updatedAt: now,
       maxIterations,
-      todos: todos.map<RalphTodo>((title, index) => ({ id: index + 1, title, status: "pending" })),
+      todos: todos.map<RalphTodo>((title, index) => ({ id: index + 1, title, status: initialTodoStatus(index, maxIterations) })),
       iterations: [],
     };
     await fs.mkdir(path.join(this.getLoopDir(name), "iterations"), { recursive: true });
@@ -44,7 +46,8 @@ export class RalphStore {
   }
 
   async readState(name: string): Promise<LoopState> {
-    return JSON.parse(await fs.readFile(statePath(this.cwd, name), "utf8")) as LoopState;
+    const filePath = statePath(this.cwd, name);
+    return parseLoopStateJson(await fs.readFile(filePath, "utf8"), filePath);
   }
 
   async listStates(): Promise<LoopState[]> {
@@ -59,7 +62,8 @@ export class RalphStore {
     const states: LoopState[] = [];
     for (const entry of entries) {
       try {
-        states.push(JSON.parse(await fs.readFile(path.join(root, entry, "state.json"), "utf8")) as LoopState);
+        const filePath = path.join(root, entry, "state.json");
+        states.push(parseLoopStateJson(await fs.readFile(filePath, "utf8"), filePath));
       } catch {
         // Ignore malformed/incomplete loop dirs in list output.
       }
@@ -102,10 +106,14 @@ async function fileExists(filePath: string): Promise<boolean> {
   }
 }
 
+function initialTodoStatus(index: number, maxIterations: number | undefined): TodoStatus {
+  return maxIterations && index >= maxIterations ? "deferred" : "queued";
+}
+
 function renderPlan(state: LoopState): string {
-  const lines = [`# Ralph loop: ${state.name}`, "", `Status: ${state.status}`, "", "## Todo", ""];
+  const lines = [`# Ralph loop: ${state.name}`, "", `Control: ${state.control}`, "", "## Todo", ""];
   for (const todo of state.todos) {
-    const box = todo.status === "completed" ? "x" : " ";
+    const box = todo.status === "complete" ? "x" : " ";
     lines.push(`- [${box}] ${todo.id}. ${todo.title} (${todo.status})`);
   }
   lines.push("");
@@ -129,3 +137,93 @@ function renderVerification(verification: VerificationRecord): string {
   lines.push("");
   return lines.join("\n");
 }
+
+const VerificationRecordSchema = Type.Object({
+  status: Type.Union([Type.Literal("passed"), Type.Literal("failed"), Type.Literal("not_run")]),
+  commands: Type.Array(Type.Object({
+    command: Type.String(),
+    exitCode: Type.Number(),
+    summary: Type.String(),
+  }, { additionalProperties: false })),
+  notes: Type.Optional(Type.String()),
+}, { additionalProperties: false });
+
+const IterationDiffStatsSchema = Type.Object({
+  filesChanged: Type.Number(),
+  insertions: Type.Number(),
+  deletions: Type.Number(),
+}, { additionalProperties: false });
+
+const IterationStateSchema = Type.Object({
+  number: Type.Number(),
+  status: Type.Union([
+    Type.Literal("planned"),
+    Type.Literal("running"),
+    Type.Literal("candidate"),
+    Type.Literal("accepted"),
+    Type.Literal("rejected"),
+    Type.Literal("failed"),
+    Type.Literal("aborted"),
+  ]),
+  todoId: Type.Optional(Type.Number()),
+  beforeRef: Type.String(),
+  afterRef: Type.Optional(Type.String()),
+  workerBranch: Type.Optional(Type.String()),
+  startedAt: Type.String(),
+  completedAt: Type.Optional(Type.String()),
+  verification: Type.Optional(VerificationRecordSchema),
+  diff: Type.Optional(IterationDiffStatsSchema),
+}, { additionalProperties: false });
+
+const RalphTodoSchema = Type.Object({
+  id: Type.Number(),
+  title: Type.String(),
+  status: Type.Union([
+    Type.Literal("queued"),
+    Type.Literal("running"),
+    Type.Literal("complete"),
+    Type.Literal("deferred"),
+    Type.Literal("failed"),
+    Type.Literal("interrupted"),
+  ]),
+}, { additionalProperties: false });
+
+const LoopStateSchema = Type.Object({
+  name: Type.String(),
+  control: Type.Union([Type.Literal("active"), Type.Literal("paused")]),
+  branch: Type.String(),
+  currentIteration: Type.Number(),
+  createdAt: Type.String(),
+  updatedAt: Type.String(),
+  maxIterations: Type.Optional(Type.Number()),
+  todos: Type.Array(RalphTodoSchema),
+  iterations: Type.Array(IterationStateSchema),
+}, { additionalProperties: false });
+
+export function parseLoopStateJson(text: string, filePath = "state.json"): LoopState {
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch (error) {
+    throw new Error(`Invalid Ralph state JSON in ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  if (Value.Check(LoopStateSchema, value)) return value;
+
+  const errors = [...Value.Errors(LoopStateSchema, value)]
+    .slice(0, 5)
+    .map((error) => `${filePath}${formatInstancePath(error.instancePath)}: ${error.message}`)
+    .join("; ");
+  throw new Error(`Invalid Ralph state in ${filePath}: ${errors || "schema validation failed"}`);
+}
+
+function formatInstancePath(instancePath: string): string {
+  if (!instancePath) return "";
+  return instancePath
+    .split("/")
+    .slice(1)
+    .map((part) => part.replace(/~1/g, "/").replace(/~0/g, "~"))
+    .map((part) => (/^\d+$/.test(part) ? `[${part}]` : `.${part}`))
+    .join("");
+}
+

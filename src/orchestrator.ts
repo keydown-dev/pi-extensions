@@ -112,7 +112,10 @@ export class RalphOrchestrator {
     await this.git.addAllAndCommit(`handoff: iteration ${String(iterationNumber).padStart(3, "0")} context`);
 
     const forwardWorkerProgress = (progress: WorkerProgress): void => {
-      options.onProgress?.({ state, worker: progress, message: `Worker ${progress.phase} for iteration ${iterationNumber}: ${todo.title}` });
+      void (async () => {
+        const progressState = await this.latestProgressState(state);
+        await options.onProgress?.({ state: progressState, worker: progress, message: `Worker ${progress.phase} for iteration ${iterationNumber}: ${todo.title}` });
+      })();
     };
 
     const result = await worker.runIteration({
@@ -156,6 +159,15 @@ export class RalphOrchestrator {
     await this.git.createRef(iteration.afterRef);
 
     return state;
+  }
+
+  private async latestProgressState(state: LoopState): Promise<LoopState> {
+    try {
+      const latest = await this.store.readState(state.name);
+      return latest.control === "paused" ? latest : state;
+    } catch {
+      return state;
+    }
   }
 
   async run(name: string, options: RunOptions = {}): Promise<LoopState> {

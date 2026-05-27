@@ -135,6 +135,38 @@ test("pausing a running loop defers remaining queued work in final state", async
   assert.deepEqual(state.todos.map((todo) => todo.status), ["complete", "deferred", "deferred"]);
 });
 
+test("worker progress after pause does not repaint deferred todos as queued", async (t) => {
+  const cwd = await createMathFixture();
+  t.after(() => fs.rm(cwd, { recursive: true, force: true }));
+  const ralph = new RalphOrchestrator(cwd);
+  await ralph.start({
+    name: "pause-progress-demo",
+    todos: ["Add subtract test and implementation", "Add multiply test and implementation", "Add divide test and implementation"],
+  });
+  const progressStatuses: string[][] = [];
+  let pausedAt = -1;
+  let pausePromise: Promise<unknown> | undefined;
+
+  await ralph.run("pause-progress-demo", {
+    maxIterations: 3,
+    workerMode: "scripted",
+    onProgress(progress) {
+      progressStatuses.push(progress.state.todos.map((todo) => todo.status));
+      if (!pausePromise && progress.state.todos.some((todo) => todo.status === "running")) {
+        pausePromise = ralph.pause("pause-progress-demo").then(() => {
+          pausedAt = progressStatuses.length;
+        });
+      }
+    },
+  });
+  assert.ok(pausePromise);
+  await pausePromise;
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.ok(pausedAt >= 0);
+  assert.ok(progressStatuses.slice(pausedAt).every((statuses) => !statuses.includes("queued")), JSON.stringify(progressStatuses));
+});
+
 test("deferred tasks are not picked until a later run scope", async (t) => {
   const cwd = await createMathFixture();
   t.after(() => fs.rm(cwd, { recursive: true, force: true }));

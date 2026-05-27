@@ -161,6 +161,8 @@ const WorkerUsageSchema = Type.Object({
   cacheWrite: Type.Number(),
   totalTokens: Type.Number(),
   cost: Type.Optional(Type.Number()),
+  contextTokens: Type.Optional(Type.Number()),
+  contextWindow: Type.Optional(Type.Number()),
 }, { additionalProperties: false });
 
 const IterationStateSchema = Type.Object({

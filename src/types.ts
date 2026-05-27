@@ -68,6 +68,8 @@ export interface WorkerUsage {
   cacheWrite: number;
   totalTokens: number;
   cost?: number;
+  contextTokens?: number;
+  contextWindow?: number;
 }
 
 export interface WorkerProgress {
@@ -102,6 +104,7 @@ export interface RunOptions {
   maxIterations?: number;
   workerMode?: WorkerMode;
   workerModel?: string;
+  workerContextWindow?: number;
   onProgress?: (progress: OrchestratorProgress) => void | Promise<void>;
   onIterationComplete?: (event: IterationCompleteEvent) => void | Promise<void>;
 }
@@ -112,6 +115,7 @@ export interface WorkerInput {
   iterationDir: string;
   packageRoot?: string;
   workerModel?: string;
+  workerContextWindow?: number;
   state: LoopState;
   iteration: IterationState;
   todo: RalphTodo;

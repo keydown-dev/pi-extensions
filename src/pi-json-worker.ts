@@ -11,7 +11,7 @@ export class PiJsonWorkerRunner {
     const outputPath = path.join(input.iterationDir, "worker-output.jsonl");
     const prompt = await this.buildPrompt(input, handoffIn, handoffOut, verificationPath);
 
-    const tracker = new WorkerProgressTracker(onProgress, input.workerModel);
+    const tracker = new WorkerProgressTracker(onProgress, input.workerModel, input.workerContextWindow);
     await appendJson(outputPath, { type: "worker_start", runner: "pi-json", timestamp: new Date().toISOString() });
     tracker.mark("starting", "worker_start");
     tracker.startHeartbeat();
@@ -187,8 +187,9 @@ class WorkerProgressTracker {
   };
   private lastEmittedAt = 0;
 
-  constructor(private readonly onProgress?: (progress: WorkerProgress) => void, configuredModel?: string) {
+  constructor(private readonly onProgress?: (progress: WorkerProgress) => void, configuredModel?: string, contextWindow?: number) {
     this.progress.configuredModel = configuredModel;
+    if (contextWindow) this.progress.usage.contextWindow = contextWindow;
   }
 
   startHeartbeat(): void {
@@ -209,7 +210,8 @@ class WorkerProgressTracker {
   }
 
   getUsage(): WorkerUsage {
-    return { ...this.progress.usage };
+    const contextTokens = this.progress.latestUsage?.totalTokens;
+    return { ...this.progress.usage, ...(contextTokens ? { contextTokens } : {}) };
   }
 
   record(event: unknown): void {
@@ -260,7 +262,7 @@ function extractToolName(content: unknown[] | undefined): string | undefined {
 }
 
 function parseUsage(value: unknown): WorkerUsage | undefined {
-  const usage = value as { input?: unknown; output?: unknown; cacheRead?: unknown; cacheWrite?: unknown; totalTokens?: unknown; cost?: { total?: unknown } } | undefined;
+  const usage = value as { input?: unknown; output?: unknown; cacheRead?: unknown; cacheWrite?: unknown; totalTokens?: unknown; contextWindow?: unknown; contextWindowTokens?: unknown; cost?: { total?: unknown } } | undefined;
   if (!usage) return undefined;
   const totalTokens = numberValue(usage.totalTokens);
   const input = numberValue(usage.input);
@@ -268,8 +270,9 @@ function parseUsage(value: unknown): WorkerUsage | undefined {
   const cacheRead = numberValue(usage.cacheRead);
   const cacheWrite = numberValue(usage.cacheWrite);
   const cost = numberValue(usage.cost?.total);
+  const contextWindow = numberValue(usage.contextWindow) || numberValue(usage.contextWindowTokens);
   if (totalTokens === 0 && input === 0 && output === 0 && cacheRead === 0 && cacheWrite === 0) return undefined;
-  return { input, output, cacheRead, cacheWrite, totalTokens, ...(cost > 0 ? { cost } : {}) };
+  return { input, output, cacheRead, cacheWrite, totalTokens, ...(cost > 0 ? { cost } : {}), ...(contextWindow > 0 ? { contextWindow } : {}) };
 }
 
 function numberValue(value: unknown): number {
@@ -289,6 +292,7 @@ function addUsage(left: WorkerUsage, right: WorkerUsage): WorkerUsage {
     cacheWrite: left.cacheWrite + right.cacheWrite,
     totalTokens: left.totalTokens + right.totalTokens,
     ...(cost > 0 ? { cost } : {}),
+    ...(right.contextWindow ?? left.contextWindow ? { contextWindow: right.contextWindow ?? left.contextWindow } : {}),
   };
 }
 

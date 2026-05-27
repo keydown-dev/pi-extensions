@@ -124,6 +124,7 @@ export class RalphOrchestrator {
       iterationDir: this.store.getIterationDir(state.name, iterationNumber),
       packageRoot: this.packageRoot,
       workerModel: options.workerModel,
+      workerContextWindow: options.workerContextWindow,
       state,
       iteration,
       todo,

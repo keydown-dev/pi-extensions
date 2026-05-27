@@ -232,13 +232,48 @@ test("Ralph widget renders compact usage and omits successful verification text"
       completedAt: "2026-05-27T00:01:00.000Z",
       verification: { status: "passed", commands: [{ command: "npm test", exitCode: 0, summary: "ok" }] },
       diff: { filesChanged: 1, insertions: 1, deletions: 1 },
-      usage: { input: 50000, output: 30000, cacheRead: 6999, cacheWrite: 0, totalTokens: 86999, cost: 0.165567 },
+      usage: { input: 50000, output: 30000, cacheRead: 6999, cacheWrite: 0, totalTokens: 86999, cost: 0.165567, contextTokens: 66100, contextWindow: 272000 },
     }],
   }));
 
   const output = renderRalphWidget(state, undefined, plainTheme as never, 120).join("\n");
-  assert.match(output, /1m 0s · 87\.0k tok · \$0\.1656 · \+1 \/ -1 · 1 files/);
+  assert.match(output, /1m 0s · ↑50k ↓30k R7\.0k · 24\.3%\/272k · \$0\.1656 · \+1 \/ -1 · 1 files/);
   assert.doesNotMatch(output, /passed|verification ok/);
+});
+
+test("Ralph widget renders running worker usage like completed rows", () => {
+  const state = parseLoopStateJson(JSON.stringify({
+    name: "widget-running-demo",
+    control: "active",
+    branch: "orchestrator/widget-running-demo",
+    currentIteration: 1,
+    createdAt: "2026-05-27T00:00:00.000Z",
+    updatedAt: "2026-05-27T00:00:00.000Z",
+    todos: [{ id: 1, title: "Do work", status: "running" }],
+    iterations: [{
+      number: 1,
+      status: "running",
+      todoId: 1,
+      beforeRef: "before",
+      startedAt: "2026-05-27T00:00:00.000Z",
+    }],
+  }));
+
+  const output = renderRalphWidget(state, {
+    phase: "running",
+    provider: "openai-codex",
+    model: "gpt-5.5",
+    elapsedMs: 80_000,
+    events: 3,
+    toolCalls: 2,
+    toolNames: ["read", "edit"],
+    assistantMessages: 1,
+    usage: { input: 261000, output: 21000, cacheRead: 4200000, cacheWrite: 0, totalTokens: 4482000, cost: 0.159, contextWindow: 272000 },
+    latestUsage: { input: 60000, output: 6000, cacheRead: 0, cacheWrite: 0, totalTokens: 66000 },
+  }, plainTheme as never, 160).join("\n");
+
+  assert.match(output, /1m 20s · ↑261k ↓21k R4\.2m · 24\.3%\/272k · \$0\.1590 · openai-codex\/gpt-5\.5 · tools read, edit/);
+  assert.doesNotMatch(output, /  running ·/);
 });
 
 test("Ralph widget renders verification problem markers", () => {
@@ -286,7 +321,7 @@ test("parseLoopStateJson validates persisted state", () => {
       completedAt: "2026-05-27T00:01:00.000Z",
       verification: { status: "passed", commands: [{ command: "npm test", exitCode: 0, summary: "ok" }] },
       diff: { filesChanged: 1, insertions: 2, deletions: 0 },
-      usage: { input: 10, output: 5, cacheRead: 2, cacheWrite: 1, totalTokens: 18, cost: 0.1234 },
+      usage: { input: 10, output: 5, cacheRead: 2, cacheWrite: 1, totalTokens: 18, cost: 0.1234, contextTokens: 15, contextWindow: 100 },
       summary: "Did work.",
       changedFiles: ["src/work.ts"],
     }],

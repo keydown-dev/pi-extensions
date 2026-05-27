@@ -109,7 +109,8 @@ export default function (pi: ExtensionAPI) {
     if (!name) throw new Error("Usage: /ralph-run [name] [--max N] [--runner pi-json] [--model MODEL]");
     const maxIterations = parseMax(argv) ?? 1;
     startBackgroundLoop(ctx, name, `Ralph run for ${name}`, async () => {
-      const state = await new RalphOrchestrator(ctx.cwd, packageRoot).run(name, { maxIterations, workerMode: parseRunner(argv), workerModel: parseModel(argv), onProgress: commandProgress(ctx), onIterationComplete: postIterationSummary });
+      const workerModel = parseModel(argv);
+      const state = await new RalphOrchestrator(ctx.cwd, packageRoot).run(name, { maxIterations, workerMode: parseRunner(argv), workerModel, workerContextWindow: resolveWorkerContextWindow(ctx, workerModel), onProgress: commandProgress(ctx), onIterationComplete: postIterationSummary });
       return { state, message: `Ralph run stopped at ${state.currentIteration} (${deriveLoopStatus(state)})` };
     });
   }
@@ -223,7 +224,7 @@ export default function (pi: ExtensionAPI) {
       currentLoop = name;
       const maxIterations = params.maxIterations ?? 1;
       const job = new RalphOrchestrator(ctx.cwd, packageRoot)
-        .run(name, { maxIterations, workerMode: parseRunnerValue(params.runner), workerModel: params.model, onProgress: commandProgress(ctx), onIterationComplete: postIterationSummary })
+        .run(name, { maxIterations, workerMode: parseRunnerValue(params.runner), workerModel: params.model, workerContextWindow: resolveWorkerContextWindow(ctx, params.model), onProgress: commandProgress(ctx), onIterationComplete: postIterationSummary })
         .then((state) => {
           setCurrent(ctx, state);
           ctx.ui.notify(`Ralph run stopped at ${state.currentIteration} (${deriveLoopStatus(state)})`, "info");
@@ -372,6 +373,26 @@ function parseModel(args: string[]): string | undefined {
   return args[index + 1];
 }
 
+function resolveWorkerContextWindow(ctx: ExtensionContext, workerModel: string | undefined): number | undefined {
+  if (!workerModel) return ctx.model?.contextWindow;
+  const model = resolveModel(ctx, workerModel);
+  return model?.contextWindow;
+}
+
+function resolveModel(ctx: ExtensionContext, modelPattern: string): { contextWindow?: number } | undefined {
+  const candidates = modelPattern.includes(":") ? [modelPattern, modelPattern.replace(/:[^:/]+$/, "")] : [modelPattern];
+  for (const candidate of candidates) {
+    const slash = candidate.indexOf("/");
+    if (slash > 0) {
+      const model = ctx.modelRegistry.find(candidate.slice(0, slash), candidate.slice(slash + 1));
+      if (model) return model;
+    }
+    const matches = ctx.modelRegistry.getAll().filter((model) => model.id === candidate);
+    if (matches.length === 1) return matches[0];
+  }
+  return undefined;
+}
+
 function parseMax(args: string[]): number | undefined {
   const index = args.includes("--max") ? args.indexOf("--max") : args.indexOf("--max-iterations");
   if (index === -1) return undefined;
@@ -452,8 +473,11 @@ function latestIterationForTodo(state: LoopState, todoId: number): LoopState["it
 function renderTodoDetail(status: LoopState["todos"][number]["status"], iteration: LoopState["iterations"][number] | undefined, worker: WorkerProgress | undefined, theme: RalphTheme): string {
   if (status === "running" && worker) {
     const model = worker.model ? `${worker.provider ? `${worker.provider}/` : ""}${worker.model}` : worker.configuredModel;
-    const tools = worker.toolNames.length ? ` · tools ${worker.toolNames.slice(-3).join(", ")}` : ` · ${worker.toolCalls} tools`;
-    return [theme.fg("muted", `running · ${formatElapsed(worker.elapsedMs)}`), model ? theme.fg("muted", ` · ${model}`) : "", theme.fg("muted", tools), renderContextUsage(worker, theme)].join("");
+    const tools = worker.toolNames.length ? `tools ${worker.toolNames.slice(-3).join(", ")}` : `${worker.toolCalls} tools`;
+    const segments = [theme.fg("muted", formatElapsed(worker.elapsedMs)), ...renderRunningUsageSegments(worker, theme)];
+    if (model) segments.push(theme.fg("muted", model));
+    segments.push(theme.fg("muted", tools));
+    return segments.join(theme.fg("muted", " · "));
   }
 
   if (status === "complete" || status === "failed" || status === "interrupted") {
@@ -483,7 +507,20 @@ function renderIterationElapsed(iteration: LoopState["iterations"][number] | und
 
 function renderUsageSegments(usage: WorkerUsage | undefined, theme: RalphTheme): string[] {
   if (!usage?.totalTokens) return [];
-  const segments = [theme.fg("muted", `${formatTokenCount(usage.totalTokens)} tok`)];
+  return renderUsageSegmentsForDisplay(usage, theme);
+}
+
+function renderRunningUsageSegments(worker: WorkerProgress, theme: RalphTheme): string[] {
+  if (!worker.usage.totalTokens) return [];
+  const latestContextTokens = worker.latestUsage?.totalTokens;
+  const contextWindow = worker.latestUsage?.contextWindow ?? worker.usage.contextWindow;
+  return renderUsageSegmentsForDisplay({ ...worker.usage, ...(latestContextTokens ? { contextTokens: latestContextTokens } : {}), ...(contextWindow ? { contextWindow } : {}) }, theme);
+}
+
+function renderUsageSegmentsForDisplay(usage: WorkerUsage, theme: RalphTheme): string[] {
+  const segments = [theme.fg("muted", renderTokenBreakdown(usage))];
+  const context = renderContextWindowUsage(usage);
+  if (context) segments.push(theme.fg("muted", context));
   if (usage.cost && usage.cost > 0) segments.push(theme.fg("muted", `$${usage.cost.toFixed(4)}`));
   return segments;
 }
@@ -492,23 +529,21 @@ function renderDiffSummarySegments(diff: NonNullable<LoopState["iterations"][num
   return [theme.fg("muted", `+${diff.insertions} / -${diff.deletions}`), theme.fg("muted", `${diff.filesChanged} files`)];
 }
 
-function renderContextUsage(worker: WorkerProgress, theme: RalphTheme): string {
-  const usage = worker.latestUsage ?? worker.usage;
-  if (!usage.totalTokens) return "";
-  const contextWindow = inferContextWindow(worker.model ?? worker.configuredModel);
-  if (!contextWindow) return theme.fg("muted", ` · ctx ${formatTokenCount(usage.totalTokens)}`);
-  const percent = Math.round((usage.totalTokens / contextWindow) * 100);
-  const color = percent > 50 ? "error" : percent >= 40 ? "warning" : "success";
-  return theme.fg(color, ` · ctx ${formatTokenCount(usage.totalTokens)} / ${formatTokenCount(contextWindow)} ${percent}%`);
+function renderTokenBreakdown(usage: WorkerUsage): string {
+  const parts = [`↑${formatTokenCount(usage.input)}`, `↓${formatTokenCount(usage.output)}`];
+  if (usage.cacheRead > 0) parts.push(`R${formatTokenCount(usage.cacheRead)}`);
+  if (usage.cacheWrite > 0) parts.push(`W${formatTokenCount(usage.cacheWrite)}`);
+  return parts.join(" ");
 }
 
-function inferContextWindow(model: string | undefined): number | undefined {
-  const normalized = model?.toLowerCase() ?? "";
-  if (!normalized) return undefined;
-  if (normalized.includes("gemini-1.5") || normalized.includes("gemini-2")) return 1_000_000;
-  if (normalized.includes("claude") || normalized.includes("sonnet") || normalized.includes("opus") || normalized.includes("haiku")) return 200_000;
-  if (normalized.includes("gpt-4o") || normalized.includes("gpt-4.1") || normalized.includes("o3") || normalized.includes("o4")) return 128_000;
-  return undefined;
+function renderContextWindowUsage(usage: WorkerUsage): string {
+  const contextTokens = usage.contextTokens ?? usage.totalTokens;
+  if (!usage.contextWindow || !contextTokens) return "";
+  return `${formatPercent(contextTokens / usage.contextWindow)}/${formatTokenCount(usage.contextWindow)}`;
+}
+
+function formatPercent(value: number): string {
+  return `${(value * 100).toFixed(1)}%`;
 }
 
 function formatTokenCount(tokens: number): string {

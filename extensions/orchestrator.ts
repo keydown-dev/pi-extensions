@@ -6,6 +6,9 @@ import { deriveLoopStatus, RalphOrchestrator, renderLoopList, renderStatus } fro
 import type { IterationCompleteEvent, LoopState, OrchestratorProgress, WorkerMode, WorkerProgress, WorkerUsage } from "../src/types.js";
 
 let currentLoop: string | null = null;
+let ralphWidgetVisible = true;
+let latestWidgetState: LoopState | null = null;
+let latestWidgetWorker: WorkerProgress | undefined;
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const activeJobs = new Map<string, Promise<void>>();
 
@@ -16,13 +19,14 @@ export default function (pi: ExtensionAPI) {
   }
 
   function updateUI(ctx: ExtensionContext, state?: LoopState | null, worker?: WorkerProgress): void {
+    latestWidgetState = state ?? null;
+    latestWidgetWorker = worker;
     if (!ctx.hasUI) return;
-    if (!state) {
-      ctx.ui.setStatus("ralph", undefined);
+    ctx.ui.setStatus("ralph", undefined);
+    if (!state || !ralphWidgetVisible) {
       ctx.ui.setWidget("ralph", undefined);
       return;
     }
-    ctx.ui.setStatus("ralph", undefined);
     ctx.ui.setWidget("ralph", (tui, widgetTheme) => {
       const interval = state.todos.some((todo) => todo.status === "running") ? setInterval(() => tui.requestRender(), PI_WORKING_SPINNER_INTERVAL_MS) : undefined;
       return {
@@ -40,6 +44,20 @@ export default function (pi: ExtensionAPI) {
       currentLoop = progress.state.name;
       updateUI(ctx, progress.state, progress.worker);
     };
+  }
+
+  function setWidgetVisible(ctx: ExtensionContext, visible: boolean): void {
+    ralphWidgetVisible = visible;
+    updateUI(ctx, latestWidgetState, latestWidgetWorker);
+    ctx.ui.notify(`Ralph widget ${visible ? "shown" : "hidden"}. Ctrl+Opt+R toggles it.`, "info");
+  }
+
+  function toggleWidget(args: string, ctx: ExtensionContext): void {
+    const mode = splitArgs(args)[0]?.toLowerCase();
+    if (mode === "show" || mode === "on") return setWidgetVisible(ctx, true);
+    if (mode === "hide" || mode === "off") return setWidgetVisible(ctx, false);
+    if (mode && mode !== "toggle") throw new Error("Usage: /ralph-widget [toggle|show|hide]");
+    setWidgetVisible(ctx, !ralphWidgetVisible);
   }
 
   function postIterationSummary(event: IterationCompleteEvent): void {
@@ -142,6 +160,20 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("ralph-status", command("Show current or named Ralph loop status", showStatus));
   pi.registerCommand("ralph-list", command("List Ralph orchestrator loops", showList));
   pi.registerCommand("ralph-run", command("Run one or more Ralph worker iterations", runLoop));
+  pi.registerCommand("ralph-widget", {
+    description: "Show, hide, or toggle the Ralph state widget",
+    handler: async (args, ctx) => {
+      try {
+        toggleWidget(args, ctx);
+      } catch (error) {
+        ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
+      }
+    },
+  });
+  pi.registerShortcut("ctrl+alt+r", {
+    description: "Show/hide the Ralph widget",
+    handler: async (ctx) => setWidgetVisible(ctx, !ralphWidgetVisible),
+  });
 
   pi.registerCommand("ralph-plan", {
     description: "Plan a Ralph loop through a grilling/planning interview before starting",
@@ -168,6 +200,7 @@ export default function (pi: ExtensionAPI) {
         if (subcommand === "kill") return killLoop(argv.join(" "), ctx);
         if (subcommand === "status") return showStatus(argv.join(" "), ctx);
         if (subcommand === "list") return showList(argv.join(" "), ctx);
+        if (subcommand === "widget") return toggleWidget(argv.join(" "), ctx);
         ctx.ui.notify(HELP, "info");
       } catch (error) {
         ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
@@ -338,6 +371,7 @@ Primary commands:
   /ralph-kill [name]                               Kill the current Ralph worker process and pause
   /ralph-status [name]                             Show current or named loop status
   /ralph-list                                      List all loops
+  /ralph-widget [toggle|show|hide]                 Show or hide the Ralph widget (Ctrl+Opt+R)
 
 Natural usage:
   Ask: "Can we set up a ralph loop to get through our issues? Max of 5 loops."`;
@@ -435,7 +469,7 @@ export function renderRalphWidget(state: LoopState, worker: WorkerProgress | und
   }
 
   lines.push(rule);
-  lines.push(theme.fg("dim", "Chat to pause, resume, kill or steer the orchestrator."));
+  lines.push(theme.fg("dim", "Ctrl+Opt+R Show/Hide · Chat to pause, resume, steer, or kill the loop."));
   return lines.map((line) => truncateAnsiToWidth(line, width));
 }
 

@@ -23,10 +23,16 @@ export default function (pi: ExtensionAPI) {
       return;
     }
     ctx.ui.setStatus("ralph", undefined);
-    ctx.ui.setWidget("ralph", (_tui, widgetTheme) => ({
-      render: (width: number) => renderRalphWidget(state, worker, widgetTheme, width),
-      invalidate: () => {},
-    }));
+    ctx.ui.setWidget("ralph", (tui, widgetTheme) => {
+      const interval = state.todos.some((todo) => todo.status === "running") ? setInterval(() => tui.requestRender(), 80) : undefined;
+      return {
+        render: (width: number) => renderRalphWidget(state, worker, widgetTheme, width),
+        invalidate: () => {},
+        dispose: () => {
+          if (interval) clearInterval(interval);
+        },
+      };
+    });
   }
 
   function commandProgress(ctx: ExtensionContext): (progress: OrchestratorProgress) => void {
@@ -384,7 +390,7 @@ function renderRalphWidget(state: LoopState, worker: WorkerProgress | undefined,
     const iteration = latestIterationForTodo(state, todo.id);
     const isRunning = todo.status === "running";
     const prefix = isRunning ? theme.fg("accent", "› ") : "  ";
-    const icon = todoGlyph(todo.status, worker?.elapsedMs);
+    const icon = todoGlyph(todo.status);
     const iconColor = todo.status === "complete" ? "success" : todo.status === "failed" || todo.status === "interrupted" ? "error" : todo.status === "running" ? "accent" : "dim";
     const titleColor = todo.status === "running" ? "accent" : todo.status === "queued" ? "text" : "muted";
     lines.push(`${prefix}${theme.fg(iconColor, icon)} ${theme.fg(titleColor, `#${todo.id} ${todo.title}`)}`);

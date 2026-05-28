@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { type ChildProcess, spawn } from "node:child_process";
 import { extractCommitSubjectFromHandoff } from "./commit-messages.js";
+import { CompactWorkerOutputWriter } from "./compact-worker-output.js";
 import type { VerificationRecord, WorkerInput, WorkerProgress, WorkerResult, WorkerUsage } from "./types.js";
 
 export class PiJsonWorkerRunner {
@@ -13,12 +14,13 @@ export class PiJsonWorkerRunner {
     const prompt = await this.buildPrompt(input, handoffIn, handoffOut, verificationPath);
 
     const tracker = new WorkerProgressTracker(onProgress, input.workerModel, input.workerContextWindow);
-    await appendJson(outputPath, { type: "worker_start", runner: "pi-json", timestamp: new Date().toISOString() });
+    const output = new CompactWorkerOutputWriter(outputPath);
+    await output.recordWorkerStart("pi-json");
     tracker.mark("starting", "worker_start");
     tracker.startHeartbeat();
-    const { exitCode, stderr, killed } = await runPiJson(input.cwd, prompt, outputPath, input.workerModel, input.state.name, (event) => tracker.record(event));
+    const { exitCode, stderr, killed } = await runPiJson(input.cwd, prompt, outputPath, output, input.workerModel, input.state.name, (event) => tracker.record(event));
     tracker.stopHeartbeat();
-    await appendJson(outputPath, { type: "worker_exit", exitCode, stderr, timestamp: new Date().toISOString() });
+    await output.recordExit(exitCode, stderr);
     tracker.mark("exited", "worker_exit");
     const usage = nonEmptyUsage(tracker.getUsage());
 
@@ -102,8 +104,12 @@ export function killRalphWorkerProcesses(loopName?: string): number {
   return killed;
 }
 
-async function runPiJson(cwd: string, prompt: string, outputPath: string, workerModel: string | undefined, loopName: string, onEvent?: (event: unknown) => void): Promise<{ exitCode: number; stderr: string; killed: boolean }> {
+async function runPiJson(cwd: string, prompt: string, outputPath: string, output: CompactWorkerOutputWriter, workerModel: string | undefined, loopName: string, onEvent?: (event: unknown) => void): Promise<{ exitCode: number; stderr: string; killed: boolean }> {
   return new Promise((resolve, reject) => {
+    const pendingWrites: Array<Promise<unknown>> = [];
+    const queueWrite = (write: Promise<unknown>): void => {
+      pendingWrites.push(write.catch(() => undefined));
+    };
     const args = ["--mode", "json", ...(workerModel ? ["--model", workerModel] : []), prompt];
     const child = spawn("pi", args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
     const processes = activeWorkerProcesses.get(loopName) ?? new Set<ChildProcess>();
@@ -117,7 +123,8 @@ async function runPiJson(cwd: string, prompt: string, outputPath: string, worker
     const absoluteTimeoutMs = readTimeoutMs("RALPH_WORKER_TIMEOUT_MS", 15 * 60_000);
     const idleTimeoutMs = readTimeoutMs("RALPH_WORKER_IDLE_TIMEOUT_MS", 3 * 60_000);
 
-    void appendJson(outputPath, { type: "worker_process", pid: child.pid, absoluteTimeoutMs, idleTimeoutMs, timestamp: new Date().toISOString() });
+    const rawOutputPath = shouldWriteRawWorkerOutput() ? path.join(path.dirname(outputPath), "worker-output.raw.jsonl") : undefined;
+    queueWrite(output.recordProcess({ pid: child.pid, absoluteTimeoutMs, idleTimeoutMs }));
 
     const killTimer = setInterval(() => {
       const now = Date.now();
@@ -136,7 +143,7 @@ async function runPiJson(cwd: string, prompt: string, outputPath: string, worker
     child.stdout.on("data", (chunk: Buffer) => {
       lastOutputAt = Date.now();
       const text = chunk.toString();
-      void fs.appendFile(outputPath, chunk);
+      if (rawOutputPath) queueWrite(fs.appendFile(rawOutputPath, chunk));
       buffered += text;
       const lines = buffered.split("\n");
       buffered = lines.pop() ?? "";
@@ -144,9 +151,11 @@ async function runPiJson(cwd: string, prompt: string, outputPath: string, worker
         const trimmed = line.trim();
         if (!trimmed) continue;
         try {
-          onEvent?.(JSON.parse(trimmed));
+          const event = JSON.parse(trimmed);
+          onEvent?.(event);
+          queueWrite(output.recordEvent(event));
         } catch {
-          // Keep raw worker output intact even if a partial/non-JSON line appears.
+          queueWrite(output.recordMalformedLine(trimmed));
         }
       }
     });
@@ -159,17 +168,22 @@ async function runPiJson(cwd: string, prompt: string, outputPath: string, worker
       if (processes.size === 0) activeWorkerProcesses.delete(loopName);
       reject(error);
     });
-    child.on("close", (code) => {
+    child.on("close", async (code) => {
       processes.delete(child);
       if (processes.size === 0) activeWorkerProcesses.delete(loopName);
       const trimmed = buffered.trim();
       if (trimmed) {
         try {
-          onEvent?.(JSON.parse(trimmed));
+          const event = JSON.parse(trimmed);
+          onEvent?.(event);
+          queueWrite(output.recordEvent(event));
         } catch {
-          // Ignore malformed tail; it is still preserved in worker-output.jsonl.
+          queueWrite(output.recordMalformedLine(trimmed));
         }
       }
+      settled = true;
+      clearInterval(killTimer);
+      await Promise.all(pendingWrites);
       const killed = killedWorkerLoops.delete(loopName) || killedWorkerLoops.delete("*");
       resolve({ exitCode: code ?? 1, stderr: stderr.trim(), killed });
     });
@@ -325,8 +339,8 @@ async function readPickupSkill(packageRoot: string | undefined): Promise<string>
   return "Read the handoff, complete one bounded task, write handoff-out.md and verification.md, then stop.";
 }
 
-async function appendJson(filePath: string, value: unknown): Promise<void> {
-  await fs.appendFile(filePath, `${JSON.stringify(value)}\n`, "utf8");
+function shouldWriteRawWorkerOutput(): boolean {
+  return ["1", "true", "yes"].includes((process.env.RALPH_WORKER_RAW_OUTPUT ?? "").toLowerCase());
 }
 
 async function exists(filePath: string): Promise<boolean> {

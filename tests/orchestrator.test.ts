@@ -84,6 +84,53 @@ console.log(JSON.stringify({ type: "message_end", message: { role: "assistant", 
   assert.match(log, /feat: touch math from fake pi/);
 });
 
+test("pi-json worker writes compact committed output and optional raw trace", async (t) => {
+  const cwd = await createMathFixture();
+  t.after(() => fs.rm(cwd, { recursive: true, force: true }));
+  const binDir = await fs.mkdtemp(path.join(os.tmpdir(), "ralph-fake-pi-"));
+  t.after(() => fs.rm(binDir, { recursive: true, force: true }));
+  const originalPath = process.env.PATH;
+  const originalRaw = process.env.RALPH_WORKER_RAW_OUTPUT;
+  process.env.PATH = `${binDir}${path.delimiter}${originalPath ?? ""}`;
+  process.env.RALPH_WORKER_RAW_OUTPUT = "1";
+  t.after(() => {
+    process.env.PATH = originalPath;
+    if (originalRaw === undefined) delete process.env.RALPH_WORKER_RAW_OUTPUT;
+    else process.env.RALPH_WORKER_RAW_OUTPUT = originalRaw;
+  });
+  await fs.writeFile(path.join(binDir, "pi"), `#!/usr/bin/env node
+import fs from "node:fs";
+import path from "node:path";
+const prompt = process.argv[process.argv.length - 1] ?? "";
+const outputs = [...prompt.matchAll(/- (\\S+\\.md)/g)].map((match) => match[1]);
+const handoffOut = outputs.find((file) => file.endsWith("handoff-out.md"));
+const verification = outputs.find((file) => file.endsWith("verification.md"));
+fs.appendFileSync(path.join(process.cwd(), "src", "math.js"), "\\nexport const compactWorkerTouched = true;\\n");
+fs.writeFileSync(handoffOut, "# Ralph handoff-out\\n\\n## Summary\\n\\nTouched math module.\\n\\n## Changed files\\n\\n- src/math.js\\n\\n## Commit subject\\n\\nfeat: compact worker output\\n");
+fs.writeFileSync(verification, "# Verification\\n\\nStatus: passed\\n\\n## Commands\\n\\n- fake pi passed\\n");
+for (let i = 0; i < 100; i++) {
+  console.log(JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "delta", partial: { content: [{ type: "text", text: "token-" + i }] } } }));
+}
+console.log(JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "toolcall_start", partial: { content: [{ type: "toolCall", name: "read", id: "call-1", input: { path: "src/math.js" } }] } } }));
+console.log(JSON.stringify({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "Done." }], usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 15 } } }));
+`, { mode: 0o755 });
+
+  const ralph = new RalphOrchestrator(cwd);
+  const state = await ralph.start({ name: "compact-output-demo", todos: ["Touch math module"] });
+  await ralph.run("compact-output-demo", { maxIterations: 1 });
+
+  const iterationDir = path.join(cwd, ".ralph", "orchestrator", "loops", state.name, "iterations", "001");
+  const compact = await fs.readFile(path.join(iterationDir, "worker-output.jsonl"), "utf8");
+  const compactRecords = compact.trim().split("\n").map((line) => JSON.parse(line));
+  assert.deepEqual(compactRecords.map((record) => record.type), ["worker_start", "worker_process", "tool_call", "assistant_message", "worker_exit", "worker_result"]);
+  assert.ok(!compact.includes("message_update"));
+  assert.ok(compact.length < 2_500, `compact output was ${compact.length} bytes`);
+
+  const raw = await fs.readFile(path.join(iterationDir, "worker-output.raw.jsonl"), "utf8");
+  assert.match(raw, /message_update/);
+  assert.ok(raw.length > compact.length);
+});
+
 test("commit message helpers use semantic todo identity and sanitized worker subjects", () => {
   assert.equal(handoffCommitMessage("ISSUE-005.1", 6), "handoff: ISSUE-005.1 context");
   assert.equal(handoffCommitMessage(undefined, 6), "handoff: iteration 006 context");

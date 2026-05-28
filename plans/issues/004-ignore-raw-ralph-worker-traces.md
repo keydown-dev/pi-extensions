@@ -26,6 +26,8 @@ Ensure Ralph creates or updates a `.ralph/.gitignore` file with rules that ignor
 - Preserve existing custom lines in `.ralph/.gitignore` and append missing Ralph-managed rules idempotently.
 - Do not ignore compact `worker-output.jsonl` by default.
 - Add an explicit Git commit exclusion policy for raw traces where practical, so safety does not rely only on ignore files.
+- The explicit Git commit exclusion policy must not break repositories whose root `.gitignore` already ignores `.ralph/`. In particular, do not replace a broad `git add -A` with a pathspec that explicitly includes `.` and causes Git to error with `The following paths are ignored by one of your .gitignore files: .ralph`.
+- Prefer a safe commit strategy such as staging normally and then removing raw trace paths from the index, or using pathspecs only in a way that is proven by tests to work when `.ralph/` is ignored and when `.ralph/` is tracked.
 - Document that projects already ignoring `.ralph/` do not need this file, but it is still harmless.
 
 ## Testing Decisions
@@ -35,6 +37,8 @@ Ensure Ralph creates or updates a `.ralph/.gitignore` file with rules that ignor
 - Test that existing custom ignore lines are preserved.
 - Test that raw files are not staged by Ralph commits when present.
 - Test that compact worker output remains eligible for commits.
+- Add a regression test for the root `.gitignore` case where `.ralph/` is ignored. Ralph commits must not fail with Git's ignored-path error.
+- Add a regression test for the tracked `.ralph/` case. Raw traces must remain untracked while compact worker output can be committed.
 
 ## Out of Scope
 

@@ -484,10 +484,8 @@ const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", 
 const PI_WORKING_SPINNER_INTERVAL_MS = 80;
 
 export function renderRalphWidget(state: LoopState, worker: WorkerProgress | undefined, theme: RalphTheme, width: number): string[] {
-  const completed = state.todos.filter((todo) => todo.status === "complete").length;
-  const max = state.maxIterations ? `/${state.maxIterations}` : "";
   const rule = theme.fg("accent", "─".repeat(Math.max(0, width)));
-  const lines: string[] = [rule, theme.fg("accent", theme.bold(`Ralph Loop · ${state.name} · ${deriveLoopStatus(state)} · Iteration ${state.currentIteration}${max} · Todos ${completed}/${state.todos.length}`)), ""];
+  const lines: string[] = [rule, theme.fg("accent", theme.bold(`Ralph Loop · ${state.name}`)), ""];
 
   for (const todo of state.todos) {
     const iteration = latestIterationForTodo(state, todo.id);
@@ -558,10 +556,6 @@ function renderTodoDetail(status: LoopState["todos"][number]["status"], iteratio
 
   if (status === "deferred") return theme.fg("dim", "deferred");
   return theme.fg("dim", "queued");
-}
-
-function renderDiffStats(diff: NonNullable<LoopState["iterations"][number]["diff"]>, theme: RalphTheme): string {
-  return [theme.fg("success", `+${diff.insertions}`), theme.fg("muted", " / "), theme.fg("error", `-${diff.deletions}`), theme.fg("muted", ` · ${diff.filesChanged} files`)].join("");
 }
 
 function renderIterationElapsed(iteration: LoopState["iterations"][number] | undefined): string {

@@ -387,6 +387,28 @@ test("completion callback is emitted before the next iteration starts", async (t
   assert.deepEqual(events, ["start:1", "complete:1:passed", "start:2", "complete:2:passed"]);
 });
 
+test("Ralph widget header only shows loop name", () => {
+  const state = parseLoopStateJson(JSON.stringify({
+    name: "widget-header-demo",
+    control: "active",
+    branch: "orchestrator/widget-header-demo",
+    currentIteration: 2,
+    maxIterations: 5,
+    createdAt: "2026-05-27T00:00:00.000Z",
+    updatedAt: "2026-05-27T00:00:00.000Z",
+    todos: [
+      { id: 1, title: "Done work", status: "complete" },
+      { id: 2, title: "Next work", status: "queued" },
+      { id: 3, title: "Later work", status: "deferred" },
+    ],
+    iterations: [],
+  }));
+
+  const output = renderRalphWidget(state, undefined, plainTheme as never, 120).join("\n");
+  assert.match(output, /Ralph Loop · widget-header-demo/);
+  assert.doesNotMatch(output, /ready|completed|Iteration|Todos 1\/3|\/5/);
+});
+
 test("Ralph widget renders compact usage and omits successful verification text", () => {
   const state = parseLoopStateJson(JSON.stringify({
     name: "widget-demo",

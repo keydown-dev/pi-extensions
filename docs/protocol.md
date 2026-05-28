@@ -74,6 +74,10 @@ Loop display status is derived from control and task statuses:
 - `ready`: control is `active` and queued or deferred work remains. If only deferred tasks remain, display ready.
 - `completed`: no queued/running/deferred/failed/interrupted tasks remain.
 
+## Todo insertion
+
+`ralph_orchestrator_insert_todo` inserts a new task after an existing stable todo ID. Existing todo IDs and completed iteration `todoId` references are preserved; execution order follows the persisted todo array order. The inserted todo defaults to `deferred`, receives the next unused internal ID, and increments `maxIterations` when that field is present. The tool refuses to modify loops with running todos or iterations and supports `dryRun: true` for a before/after preview.
+
 ## Run-limit behavior
 
 `/ralph-start --max N` creates the first `N` tasks as `queued` and the rest as `deferred`.

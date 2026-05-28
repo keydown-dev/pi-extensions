@@ -183,6 +183,49 @@ test("deferred tasks are not picked until a later run scope", async (t) => {
   assert.deepEqual(state.todos.map((todo) => todo.status), ["complete", "complete", "deferred"]);
 });
 
+test("insertTodo preserves existing IDs and inserts a deferred todo after a stable ID", async (t) => {
+  const cwd = await createMathFixture();
+  t.after(() => fs.rm(cwd, { recursive: true, force: true }));
+  const ralph = new RalphOrchestrator(cwd);
+  await ralph.start({ name: "insert-demo", todos: ["First", "Second", "Third"], maxIterations: 2 });
+
+  const preview = await ralph.insertTodo({ name: "insert-demo", afterTodoId: 1, title: "Iteration 1.1: Extra work", dryRun: true });
+  assert.equal(preview.dryRun, true);
+  assert.deepEqual(preview.state.todos.map((todo) => todo.id), [1, 4, 2, 3]);
+  assert.deepEqual(preview.state.todos.map((todo) => todo.status), ["queued", "deferred", "queued", "deferred"]);
+  assert.deepEqual(preview.maxIterationsChange, { before: 2, after: 3 });
+
+  let persisted = await ralph.status("insert-demo");
+  assert.deepEqual(persisted.todos.map((todo) => todo.id), [1, 2, 3]);
+  assert.equal(persisted.maxIterations, 2);
+
+  const result = await ralph.insertTodo({ name: "insert-demo", afterTodoId: 1, title: "Iteration 1.1: Extra work" });
+  assert.equal(result.dryRun, false);
+  assert.deepEqual(result.state.todos.map((todo) => `${todo.id}:${todo.title}:${todo.status}`), [
+    "1:First:queued",
+    "4:Iteration 1.1: Extra work:deferred",
+    "2:Second:queued",
+    "3:Third:deferred",
+  ]);
+  assert.equal(result.state.maxIterations, 3);
+
+  persisted = await ralph.status("insert-demo");
+  assert.deepEqual(persisted.todos.map((todo) => todo.id), [1, 4, 2, 3]);
+  const plan = await fs.readFile(path.join(cwd, ".ralph", "orchestrator", "loops", "insert-demo", "plan.md"), "utf8");
+  assert.match(plan, /- \[ \] 1\. First \(queued\)\n- \[ \] 4\. Iteration 1\.1: Extra work \(deferred\)\n- \[ \] 2\. Second \(queued\)/);
+});
+
+test("insertTodo refuses to modify a loop with running work", async (t) => {
+  const cwd = await createMathFixture();
+  t.after(() => fs.rm(cwd, { recursive: true, force: true }));
+  const ralph = new RalphOrchestrator(cwd);
+  const state = await ralph.start({ name: "insert-running-demo", todos: ["First", "Second"] });
+  state.todos[0]!.status = "running";
+  await fs.writeFile(path.join(cwd, ".ralph", "orchestrator", "loops", "insert-running-demo", "state.json"), `${JSON.stringify(state, null, 2)}\n`, "utf8");
+
+  await assert.rejects(() => ralph.insertTodo({ name: "insert-running-demo", afterTodoId: 1, title: "Extra" }), /while loop is running/);
+});
+
 test("derived status reports needs attention for interrupted tasks", async (t) => {
   const cwd = await createMathFixture();
   t.after(() => fs.rm(cwd, { recursive: true, force: true }));

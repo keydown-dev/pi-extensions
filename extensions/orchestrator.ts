@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { deriveLoopStatus, RalphOrchestrator, renderLoopList, renderStatus } from "../src/orchestrator.js";
-import type { IterationCompleteEvent, LoopState, OrchestratorProgress, WorkerMode, WorkerProgress, WorkerUsage } from "../src/types.js";
+import type { InsertTodoResult, IterationCompleteEvent, LoopState, OrchestratorProgress, WorkerMode, WorkerProgress, WorkerUsage } from "../src/types.js";
 
 let currentLoop: string | null = null;
 let ralphWidgetVisible = true;
@@ -270,6 +270,28 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.registerTool({
+    name: "ralph_orchestrator_insert_todo",
+    label: "Insert Ralph Todo",
+    description: "Safely insert a deferred todo into an existing Ralph loop after a stable todo ID without renumbering existing todos.",
+    promptSnippet: "Insert a new Ralph todo after a completed iteration/todo; dry-run first when the user wants a preview.",
+    parameters: Type.Object({
+      name: Type.Optional(Type.String({ description: "Loop name. Defaults to the current active loop when available." })),
+      afterTodoId: Type.Number({ description: "Stable internal todo ID to insert after. Existing IDs are preserved." }),
+      title: Type.String({ description: "Title for the new todo, e.g. Iteration 5.1: Complete plans/issues/005.1.md." }),
+      status: Type.Optional(Type.Union([Type.Literal("deferred"), Type.Literal("queued")], { description: "Initial status for the inserted todo. Defaults to deferred." })),
+      dryRun: Type.Optional(Type.Boolean({ description: "Preview the state change without writing state.json or plan.md." })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const name = params.name ?? currentLoop;
+      if (!name) throw new Error("No Ralph loop name provided and no active loop is set.");
+      if (activeJobs.has(name)) throw new Error(`Cannot insert a Ralph todo while loop is running: ${name}. Pause or wait for the active worker to finish first.`);
+      const result = await new RalphOrchestrator(ctx.cwd, packageRoot).insertTodo({ name, afterTodoId: params.afterTodoId, title: params.title, status: params.status, dryRun: params.dryRun });
+      if (!result.dryRun) updateUI(ctx, result.state);
+      return { content: [{ type: "text", text: renderInsertTodoResponse(result) }], details: { ...result, nextAction: result.dryRun ? "If the preview looks correct, call ralph_orchestrator_insert_todo again with dryRun false or omitted." : nextActionForState(result.state) } };
+    },
+  });
+
+  pi.registerTool({
     name: "ralph_orchestrator_pause",
     label: "Pause Ralph Loop",
     description: "Pause a Ralph loop after the current worker iteration exits. Does not kill the active child process.",
@@ -334,8 +356,8 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("input", async (event) => {
     if (event.source === "extension") return { action: "continue" as const };
-    if (/\bralph\b/i.test(event.text) && /\b(loop|loops|iterate|iterations|issues?|pause|resume|run|kill|abort|status|list)\b/i.test(event.text) && !event.text.startsWith("/")) {
-      return { action: "transform" as const, text: `${event.text}\n\nIf this is a request to create, manage, pause, resume by running, kill, or inspect a Ralph loop, use ralph_orchestrator_start, ralph_orchestrator_run, ralph_orchestrator_pause, ralph_orchestrator_kill, ralph_orchestrator_status, or ralph_orchestrator_list as appropriate.` };
+    if (/\bralph\b/i.test(event.text) && /\b(loop|loops|iterate|iterations|issues?|todos?|insert|pause|resume|run|kill|abort|status|list)\b/i.test(event.text) && !event.text.startsWith("/")) {
+      return { action: "transform" as const, text: `${event.text}\n\nIf this is a request to create, manage, insert todos into, pause, resume by running, kill, or inspect a Ralph loop, use ralph_orchestrator_start, ralph_orchestrator_insert_todo, ralph_orchestrator_run, ralph_orchestrator_pause, ralph_orchestrator_kill, ralph_orchestrator_status, or ralph_orchestrator_list as appropriate.` };
     }
     return { action: "continue" as const };
   });
@@ -444,6 +466,16 @@ function extractTodos(taskContent: string): string[] {
 
 function renderToolResponse(state: LoopState, lead: string): string {
   return `${lead}\n\n${renderStatus(state)}\n\nNext action: ${nextActionForState(state)}`;
+}
+
+function renderInsertTodoResponse(result: InsertTodoResult): string {
+  const action = result.dryRun ? "Dry run: would insert" : "Inserted";
+  const maxChange = result.maxIterationsChange ? `\n- maxIterations: ${result.maxIterationsChange.before} → ${result.maxIterationsChange.after}` : "";
+  const preserved = result.state.todos
+    .filter((todo) => todo.id !== result.insertedTodo.id)
+    .map((todo) => `#${todo.id}`)
+    .join(", ");
+  return `${action} Ralph todo #${result.insertedTodo.id} after #${result.afterTodoId}: ${result.insertedTodo.title}\n\nChanges:\n- status: ${result.insertedTodo.status}\n- existing todo IDs preserved: ${preserved || "none"}${maxChange}\n\n${renderStatus(result.state)}\n\nNext action: ${result.dryRun ? "Review the preview, then insert without dryRun if approved." : nextActionForState(result.state)}`;
 }
 
 type RalphTheme = ExtensionContext["ui"]["theme"];

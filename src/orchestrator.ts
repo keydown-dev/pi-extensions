@@ -5,7 +5,7 @@ import { slugifyLoopName } from "./paths.js";
 import { killRalphWorkerProcesses, PiJsonWorkerRunner } from "./pi-json-worker.js";
 import { ScriptedMathWorker } from "./scripted-worker.js";
 import { RalphStore } from "./store.js";
-import type { DerivedLoopStatus, IterationState, LoopState, RunOptions, StartOptions, WorkerProgress } from "./types.js";
+import type { DerivedLoopStatus, InsertTodoOptions, InsertTodoResult, IterationState, LoopState, RalphTodo, RunOptions, StartOptions, WorkerProgress } from "./types.js";
 
 const DEFAULT_TODOS = ["Add subtract test and implementation", "Add multiply test and implementation", "Add divide test and implementation"];
 
@@ -37,6 +37,45 @@ export class RalphOrchestrator {
 
   async list(): Promise<LoopState[]> {
     return this.store.listStates();
+  }
+
+  async insertTodo(options: InsertTodoOptions): Promise<InsertTodoResult> {
+    const state = await this.store.readState(slugifyLoopName(options.name));
+    assertLoopSafeForTodoInsertion(state);
+    const title = options.title.trim();
+    if (!title) throw new Error("Inserted Ralph todo title cannot be empty.");
+    const insertAfterIndex = state.todos.findIndex((todo) => todo.id === options.afterTodoId);
+    if (insertAfterIndex === -1) throw new Error(`Ralph todo not found in ${state.name}: #${options.afterTodoId}`);
+
+    const maxIterationsBefore = state.maxIterations;
+    const insertedTodo: RalphTodo = {
+      id: nextTodoId(state),
+      title,
+      status: options.status ?? "deferred",
+    };
+    const nextState: LoopState = {
+      ...state,
+      todos: [
+        ...state.todos.slice(0, insertAfterIndex + 1),
+        insertedTodo,
+        ...state.todos.slice(insertAfterIndex + 1),
+      ],
+      maxIterations: state.maxIterations === undefined ? undefined : state.maxIterations + 1,
+      iterations: [...state.iterations],
+    };
+
+    if (!options.dryRun) {
+      await this.store.writeState(nextState);
+      await this.git.addAllAndCommit(`orchestrator: insert todo ${insertedTodo.id} into ${state.name}`);
+    }
+
+    return {
+      state: nextState,
+      insertedTodo,
+      afterTodoId: options.afterTodoId,
+      dryRun: options.dryRun ?? false,
+      maxIterationsChange: maxIterationsBefore === undefined ? undefined : { before: maxIterationsBefore, after: maxIterationsBefore + 1 },
+    };
   }
 
   async pause(name: string): Promise<LoopState> {
@@ -202,6 +241,16 @@ function deferQueuedTodos(state: LoopState): void {
   for (const todo of state.todos) {
     if (todo.status === "queued") todo.status = "deferred";
   }
+}
+
+function assertLoopSafeForTodoInsertion(state: LoopState): void {
+  if (state.todos.some((todo) => todo.status === "running") || state.iterations.some((iteration) => iteration.status === "running")) {
+    throw new Error(`Cannot insert a Ralph todo while loop is running: ${state.name}. Pause or wait for the active worker to finish first.`);
+  }
+}
+
+function nextTodoId(state: LoopState): number {
+  return Math.max(0, ...state.todos.map((todo) => todo.id)) + 1;
 }
 
 function prepareRunScope(state: LoopState, max: number): void {

@@ -9,6 +9,24 @@ export interface RalphTodo {
   status: TodoStatus;
 }
 
+export type InsertTodoStatus = "queued" | "deferred";
+
+export interface InsertTodoOptions {
+  name: string;
+  afterTodoId: number;
+  title: string;
+  status?: InsertTodoStatus;
+  dryRun?: boolean;
+}
+
+export interface InsertTodoResult {
+  state: LoopState;
+  insertedTodo: RalphTodo;
+  afterTodoId: number;
+  dryRun: boolean;
+  maxIterationsChange?: { before: number; after: number };
+}
+
 export interface VerificationRecord {
   status: "passed" | "failed" | "not_run";
   commands: Array<{

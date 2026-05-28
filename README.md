@@ -58,12 +58,15 @@ Agent tools:
 - `ralph_orchestrator_plan`
 - `ralph_orchestrator_start`
 - `ralph_orchestrator_run`
+- `ralph_orchestrator_insert_todo`
 - `ralph_orchestrator_pause`
 - `ralph_orchestrator_kill`
 - `ralph_orchestrator_status`
 - `ralph_orchestrator_list`
 
 The run tool/command returns immediately after starting background orchestration, so the parent/orchestrator chat remains available while the Ralph widget streams progress. Widget hint: `Chat to pause, resume, kill or steer the orchestrator.`
+
+`ralph_orchestrator_insert_todo` safely inserts a new todo after a stable `afterTodoId` without renumbering existing todos or completed iteration references. It refuses to run while any todo/iteration is `running`, defaults the inserted todo to `deferred`, increments `maxIterations` when present, updates both `state.json` and `plan.md`, and supports `dryRun: true` for preview.
 
 ## State model
 

@@ -66,7 +66,7 @@ Agent tools:
 
 The run tool/command returns immediately after starting background orchestration, so the parent/orchestrator chat remains available while the Ralph widget streams progress. Widget hint: `Chat to pause, resume, kill or steer the orchestrator.`
 
-`ralph_orchestrator_insert_todo` safely inserts a new todo after a stable `afterTodoId` without renumbering existing todos or completed iteration references. It refuses to run while any todo/iteration is `running`, defaults the inserted todo to `deferred`, increments `maxIterations` when present, updates both `state.json` and `plan.md`, and supports `dryRun: true` for preview.
+`ralph_orchestrator_insert_todo` safely inserts a new todo after a stable `afterTodoId` without renumbering existing todos or completed iteration references. Todo IDs are semantic identity, not list positions; execution order follows the persisted todo array. The insert tool refuses to run while any todo/iteration is `running`, defaults the inserted todo to `deferred`, requires a caller-provided semantic ID such as `ISSUE-005.1`, increments `maxIterations` when present, updates both `state.json` and `plan.md`, and supports `dryRun: true` for preview.
 
 ## State model
 
@@ -98,11 +98,15 @@ Display status is derived:
 - **Resume**: there is no resume command. Running again (`/ralph-run`) sets control to `active` and picks queued work.
 - **Kill**: send `SIGTERM` to active child `pi --mode json` workers. The loop is paused. If non-Ralph worktree changes are detected, the running task becomes `interrupted`; otherwise it can return to `queued`. Inspect Ralph status and `git status` before running again.
 
-## Artifacts and git policy
+## Artifacts, identity, and git policy
 
-Starting a loop requires a clean worktree, creates/checks out `orchestrator/<loop-name>`, and commits initial loop state. Each iteration commits handoff context before the worker starts, then commits the worker result when the iteration finishes. The orchestrator records before/after refs and captures code diff stats for completed work, excluding local `.ralph/` artifacts from displayed line counts.
+Starting a loop requires a clean worktree, creates/checks out `orchestrator/<loop-name>`, and commits initial loop state. Each iteration creates a handoff commit (`handoff: <todo-id> context`) before the worker starts, then a worker-result commit when the iteration finishes. Worker commits use a valid single-line `## Commit subject` from `handoff-out.md` when provided, otherwise fall back to `worker: <todo-id> changes`.
 
-Ralph artifacts live under `.ralph/orchestrator/`. This repo ignores `.ralph/` so loop state, handoffs, and worker transcripts stay local unless a project explicitly chooses to track them.
+Todo IDs are stable semantic identity (`001-document-protocol`, `ISSUE-005.1`); physical iteration numbers, directories, and refs remain numeric and chronological. The orchestrator records before/after refs and captures code diff stats for completed work, excluding local `.ralph/` artifacts from displayed line counts.
+
+Ralph artifacts live under `.ralph/orchestrator/`. This repo ignores `.ralph/` so loop state, handoffs, and worker transcripts stay local unless a project explicitly chooses to track them. When `.ralph/` is tracked, `worker-output.jsonl` is the compact committed worker event summary. Raw diagnostic traces such as `worker-output.raw.jsonl` are local-only, ignored by Ralph-managed `.ralph/.gitignore`, and unstaged before commits. Enable raw traces for debugging with `RALPH_WORKER_RAW_OUTPUT=1` (`true` and `yes` also work).
+
+See `docs/protocol.md` for the full state, artifact, commit, worker-output, and schema compatibility protocol.
 
 ## Test
 

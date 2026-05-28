@@ -7,35 +7,79 @@
 - Pickup skill: guides fresh workers through one bounded task.
 - Report skill: guides workers to produce durable output artifacts.
 
+## Todo identity and execution order
+
+Ralph todo IDs are stable semantic identifiers, not list positions. Newly created loops derive IDs from the todo title and original creation index, for example `001-document-protocol` or issue-like IDs such as `ISSUE-005.1`. Inserted todos must provide an explicit semantic ID.
+
+The persisted `todos` array controls execution order. Ralph selects queued work by walking that array; inserting a todo changes array order without renumbering existing todo IDs or completed iteration references. Treat `todo.id` as durable identity and array position as mutable scheduling order.
+
+Physical iteration numbers remain numeric and chronological. Iteration directories, refs, and display counters use padded numbers such as `iterations/005/`, `iter-005-before`, and `iter-005-after`. `iteration.todoId` links a numeric execution attempt back to the semantic todo it executed.
+
 ## Artifact root
 
-Loop artifacts live under `.ralph/orchestrator/loops/<loop>/`. Projects should usually ignore `.ralph/` so local loop state, handoffs, and worker transcripts are not committed by default.
+Loop artifacts live under `.ralph/orchestrator/loops/<loop>/`. Projects usually ignore `.ralph/` so local loop state, handoffs, and worker transcripts stay local by default. If a project chooses to track `.ralph/`, Ralph still treats raw diagnostic traces as local-only ignored files.
+
+Ralph also creates or updates `.ralph/.gitignore` with Ralph-managed diagnostic rules:
+
+```gitignore
+# Ralph-managed local diagnostics
+worker-output.raw.jsonl
+worker-output.raw.jsonl.*
+*.raw.jsonl
+*.raw.jsonl.*
+```
+
+The generator is idempotent and preserves custom rules already present in `.ralph/.gitignore`.
 
 ## Required iteration files
 
-- `handoff-in.md`: exact input context for the worker.
-- `handoff-out.md`: worker summary and handoff back to orchestrator.
-- `verification.md`: commands run and results.
-- `worker-output.jsonl`: event stream or scripted-worker events.
+- `handoff-in.md`: exact input context for the worker and the assignment boundary.
+- `handoff-out.md`: worker summary, changed files, optional commit subject, and handoff back to orchestrator.
+- `verification.md`: commands run and results. It must contain `Status: passed`, `Status: failed`, or `Status: not_run`.
+- `worker-output.jsonl`: compact committed worker event summary.
 - `git-before.txt`: status before worker activity.
 - `git-after.txt`: status after worker activity.
+
+Optional local-only diagnostics:
+
+- `worker-output.raw.jsonl`: raw `pi --mode json` stdout trace when raw output is enabled.
+- `worker-output.raw.jsonl.*` / `*.raw.jsonl*`: rotated or ad-hoc raw traces; ignored by Ralph-managed gitignore rules and unstaged before commits.
+
+`worker-output.jsonl` is intentionally compact and durable. It records worker start/process metadata, assistant message summaries, tool calls/results, usage snapshots, warnings for malformed lines, worker exit, and the final `worker_result`. Large values are truncated so repository history remains readable.
 
 ## Git policy
 
 - Starting a loop requires a clean worktree and creates/checks out `orchestrator/<loop>`.
 - The initial loop state is committed on that branch.
-- Each iteration commits handoff context before the worker starts.
-- Each completed iteration commits worker changes and artifacts after verification is captured.
+- Each iteration first commits handoff context before the worker starts. This commit is the assignment/context boundary and uses `handoff: <todo-id> context`.
+- Each completed iteration then commits worker changes and artifacts after verification is captured. This commit is the result boundary.
+- Worker commits use the worker-provided `## Commit subject` from `handoff-out.md` when it is valid; otherwise they fall back to `worker: <todo-id> changes`.
 - Displayed diff stats are computed from code changes since the handoff commit, excluding `.ralph/` artifacts.
+- Raw trace files under `.ralph/` are unstaged before commit even when `.ralph/` is tracked.
+
+Commit subject rules:
+
+- `handoff: ISSUE-005.1 context` for semantic todo `ISSUE-005.1`.
+- `worker: ISSUE-005.1 changes` when no valid worker subject is provided.
+- A worker subject must be a single non-empty line after trimming and whitespace normalization, no longer than 120 characters, for example `feat: document Ralph artifact protocol`.
+- Legacy states without a usable todo ID fall back to `iteration 006` in commit messages.
 
 ## Git refs
 
 - `refs/ralph/<loop>/iter-001-before`
 - `refs/ralph/<loop>/iter-001-after`
 
+Refs stay numeric because they identify physical chronological attempts, not semantic todo identity.
+
 ## Runner boundary
 
 The default `pi-json` runner spawns a fresh `pi --mode json` worker process. The deterministic `scripted` runner is retained for local tests and writes the same artifacts.
+
+The `pi-json` runner accepts these environment options:
+
+- `RALPH_WORKER_RAW_OUTPUT=1` (also `true` or `yes`): write `worker-output.raw.jsonl` alongside compact output for debugging.
+- `RALPH_WORKER_TIMEOUT_MS`: absolute worker timeout; default 15 minutes.
+- `RALPH_WORKER_IDLE_TIMEOUT_MS`: idle-output timeout; default 3 minutes.
 
 ## Persisted state model
 
@@ -74,9 +118,44 @@ Loop display status is derived from control and task statuses:
 - `ready`: control is `active` and queued or deferred work remains. If only deferred tasks remain, display ready.
 - `completed`: no queued/running/deferred/failed/interrupted tasks remain.
 
+## Schema compatibility and migration rules
+
+Current state validation is strict about field names and status values, but `todo.id` and `iteration.todoId` accept both strings and numbers. This preserves compatibility with legacy numeric loops while new loops use semantic string IDs.
+
+Migration invariants for future protocol changes:
+
+- Never treat a todo ID as an array index.
+- Never renumber existing todo IDs during migration or insertion.
+- Preserve completed `iteration.todoId` references exactly so historical attempts keep pointing at the same todo identity.
+- Keep physical iteration numbers, directories, and refs numeric and chronological.
+- For legacy numeric IDs, stringify only at display/commit-message boundaries as needed; do not rewrite history merely to prettify IDs.
+- If a state lacks a usable todo ID for an iteration, use the numeric iteration fallback label (`iteration 006`) rather than inventing identity.
+- Add new durable fields as optional first, then document acceptance criteria before making them required.
+
+## Worker/orchestrator responsibilities
+
+Orchestrator responsibilities:
+
+- Create and validate loop state.
+- Generate handoff, verification placeholder, compact output file, before/after git status files, and refs.
+- Enforce clean-worktree and commit policy.
+- Parse worker-produced `handoff-out.md`, `verification.md`, compact usage, changed files, and optional commit subject.
+- Keep raw traces out of durable commits.
+
+Worker responsibilities:
+
+- Read only the assigned `handoff-in.md` first, then inspect referenced files or the minimum necessary local context.
+- Complete exactly the assigned todo slice.
+- Write `verification.md` with commands/results and a status line.
+- Write `handoff-out.md` with these parseable sections:
+  - `## Summary`: concise outcome or blocker.
+  - `## Changed files`: markdown bullets of changed paths, or `- None` if blocked/no changes.
+  - `## Commit subject`: one short single-line subject when a suitable project style can be inferred.
+- Stop after reporting; do not start the next iteration.
+
 ## Todo insertion
 
-`ralph_orchestrator_insert_todo` inserts a new task after an existing stable todo ID. Existing todo IDs and completed iteration `todoId` references are preserved; execution order follows the persisted todo array order. The inserted todo defaults to `deferred`, receives the next unused internal ID, and increments `maxIterations` when that field is present. The tool refuses to modify loops with running todos or iterations and supports `dryRun: true` for a before/after preview.
+`ralph_orchestrator_insert_todo` inserts a new task after an existing stable todo ID. Existing todo IDs and completed iteration `todoId` references are preserved; execution order follows the persisted todo array order. The inserted todo defaults to `deferred`, uses the caller-provided semantic ID, and increments `maxIterations` when that field is present. The tool refuses to modify loops with running todos or iterations and supports `dryRun: true` for a before/after preview.
 
 ## Run-limit behavior
 

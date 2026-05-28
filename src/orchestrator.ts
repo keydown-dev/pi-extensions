@@ -44,21 +44,24 @@ export class RalphOrchestrator {
     assertLoopSafeForTodoInsertion(state);
     const title = options.title.trim();
     if (!title) throw new Error("Inserted Ralph todo title cannot be empty.");
-    const insertAfterIndex = state.todos.findIndex((todo) => todo.id === options.afterTodoId);
-    if (insertAfterIndex === -1) throw new Error(`Ralph todo not found in ${state.name}: #${options.afterTodoId}`);
+    const id = options.id.trim();
+    if (!id) throw new Error("Inserted Ralph todo id cannot be empty.");
+    if (state.todos.some((todo) => String(todo.id) === id)) throw new Error(`Ralph todo id already exists in ${state.name}: ${id}`);
+    const insertAtIndex = options.insertAtIndex ?? state.todos.length;
+    assertValidInsertAtIndex(state, insertAtIndex);
 
     const maxIterationsBefore = state.maxIterations;
     const insertedTodo: RalphTodo = {
-      id: nextTodoId(state),
+      id,
       title,
       status: options.status ?? "deferred",
     };
     const nextState: LoopState = {
       ...state,
       todos: [
-        ...state.todos.slice(0, insertAfterIndex + 1),
+        ...state.todos.slice(0, insertAtIndex),
         insertedTodo,
-        ...state.todos.slice(insertAfterIndex + 1),
+        ...state.todos.slice(insertAtIndex),
       ],
       maxIterations: state.maxIterations === undefined ? undefined : state.maxIterations + 1,
       iterations: [...state.iterations],
@@ -72,7 +75,7 @@ export class RalphOrchestrator {
     return {
       state: nextState,
       insertedTodo,
-      afterTodoId: options.afterTodoId,
+      insertAtIndex,
       dryRun: options.dryRun ?? false,
       maxIterationsChange: maxIterationsBefore === undefined ? undefined : { before: maxIterationsBefore, after: maxIterationsBefore + 1 },
     };
@@ -249,8 +252,25 @@ function assertLoopSafeForTodoInsertion(state: LoopState): void {
   }
 }
 
-function nextTodoId(state: LoopState): number {
-  return Math.max(0, ...state.todos.map((todo) => todo.id)) + 1;
+function assertValidInsertAtIndex(state: LoopState, insertAtIndex: number): void {
+  if (!Number.isInteger(insertAtIndex) || insertAtIndex < 0 || insertAtIndex > state.todos.length) {
+    throw new Error(`insertAtIndex must be an integer between 0 and ${state.todos.length}.`);
+  }
+
+  let seenIncomplete = false;
+  let completedPrefixLength = 0;
+  for (const todo of state.todos) {
+    if (todo.status === "complete") {
+      if (seenIncomplete) throw new Error(`Cannot insert Ralph todo because completed todos in ${state.name} do not form a prefix.`);
+      completedPrefixLength += 1;
+    } else {
+      seenIncomplete = true;
+    }
+  }
+
+  if (insertAtIndex < completedPrefixLength) {
+    throw new Error(`Cannot insert Ralph todo before completed work. insertAtIndex must be at least ${completedPrefixLength}.`);
+  }
 }
 
 function prepareRunScope(state: LoopState, max: number): void {
@@ -317,7 +337,7 @@ function statusIcon(status: DerivedLoopStatus): string {
   return status === "running" ? "◐" : status === "ready" ? "●" : status === "completed" ? "✓" : status === "needs_attention" ? "✗" : "⏸";
 }
 
-function latestIterationForTodo(state: LoopState, todoId: number): LoopState["iterations"][number] | undefined {
+function latestIterationForTodo(state: LoopState, todoId: RalphTodo["id"]): LoopState["iterations"][number] | undefined {
   for (let index = state.iterations.length - 1; index >= 0; index--) {
     const iteration = state.iterations[index];
     if (iteration?.todoId === todoId) return iteration;

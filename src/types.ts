@@ -3,8 +3,10 @@ export type DerivedLoopStatus = "running" | "paused" | "needs_attention" | "comp
 export type IterationStatus = "planned" | "running" | "candidate" | "accepted" | "rejected" | "failed" | "aborted";
 export type TodoStatus = "queued" | "running" | "complete" | "deferred" | "failed" | "interrupted";
 
+export type RalphTodoId = string | number;
+
 export interface RalphTodo {
-  id: number;
+  id: RalphTodoId;
   title: string;
   status: TodoStatus;
 }
@@ -13,8 +15,9 @@ export type InsertTodoStatus = "queued" | "deferred";
 
 export interface InsertTodoOptions {
   name: string;
-  afterTodoId: number;
+  id: string;
   title: string;
+  insertAtIndex?: number;
   status?: InsertTodoStatus;
   dryRun?: boolean;
 }
@@ -22,7 +25,7 @@ export interface InsertTodoOptions {
 export interface InsertTodoResult {
   state: LoopState;
   insertedTodo: RalphTodo;
-  afterTodoId: number;
+  insertAtIndex: number;
   dryRun: boolean;
   maxIterationsChange?: { before: number; after: number };
 }
@@ -46,7 +49,7 @@ export interface IterationDiffStats {
 export interface IterationState {
   number: number;
   status: IterationStatus;
-  todoId?: number;
+  todoId?: RalphTodoId;
   beforeRef: string;
   afterRef?: string;
   workerBranch?: string;

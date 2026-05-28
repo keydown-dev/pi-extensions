@@ -37,9 +37,11 @@ test("scripted Ralph loop adds tests and implementations over three iterations",
   const status = renderStatus(state);
   assert.match(status, /Ralph Orchestrator · math-kata/);
   assert.match(status, /Todos 3\/3/);
-  assert.match(status, /└─ ✓ #3 Add divide/);
+  assert.match(status, /└─ ✓ #003-add-divide-test-and-implementation Add divide/);
   assert.match(status, /\+\d+ \/ -\d+ · \d+ files/);
 
+  const handoffIn = await fs.readFile(path.join(cwd, ".ralph", "orchestrator", "loops", "math-kata", "iterations", "003", "handoff-in.md"), "utf8");
+  assert.match(handoffIn, /Todo: 003-add-divide-test-and-implementation\. Add divide test and implementation/);
   const handoffOut = await fs.readFile(path.join(cwd, ".ralph", "orchestrator", "loops", "math-kata", "iterations", "003", "handoff-out.md"), "utf8");
   assert.match(handoffOut, /Added divide test and implementation/);
 
@@ -72,7 +74,7 @@ test("run emits progress with running todo before worker completes", async (t) =
     },
   });
 
-  assert.ok(progressMessages.some((message) => message.includes("◐ #1 Add subtract test and implementation (working)")));
+  assert.ok(progressMessages.some((message) => message.includes("◐ #001-add-subtract-test-and-implementation Add subtract test and implementation (working)")));
 });
 
 test("progress includes configured worker model", async (t) => {
@@ -183,36 +185,37 @@ test("deferred tasks are not picked until a later run scope", async (t) => {
   assert.deepEqual(state.todos.map((todo) => todo.status), ["complete", "complete", "deferred"]);
 });
 
-test("insertTodo preserves existing IDs and inserts a deferred todo after a stable ID", async (t) => {
+test("insertTodo requires a semantic ID and inserts at an array index", async (t) => {
   const cwd = await createMathFixture();
   t.after(() => fs.rm(cwd, { recursive: true, force: true }));
   const ralph = new RalphOrchestrator(cwd);
   await ralph.start({ name: "insert-demo", todos: ["First", "Second", "Third"], maxIterations: 2 });
 
-  const preview = await ralph.insertTodo({ name: "insert-demo", afterTodoId: 1, title: "Iteration 1.1: Extra work", dryRun: true });
+  const preview = await ralph.insertTodo({ name: "insert-demo", id: "001.1-extra-work", insertAtIndex: 1, title: "Iteration 1.1: Extra work", dryRun: true });
   assert.equal(preview.dryRun, true);
-  assert.deepEqual(preview.state.todos.map((todo) => todo.id), [1, 4, 2, 3]);
+  assert.equal(preview.insertAtIndex, 1);
+  assert.deepEqual(preview.state.todos.map((todo) => todo.id), ["001-first", "001.1-extra-work", "002-second", "003-third"]);
   assert.deepEqual(preview.state.todos.map((todo) => todo.status), ["queued", "deferred", "queued", "deferred"]);
   assert.deepEqual(preview.maxIterationsChange, { before: 2, after: 3 });
 
   let persisted = await ralph.status("insert-demo");
-  assert.deepEqual(persisted.todos.map((todo) => todo.id), [1, 2, 3]);
+  assert.deepEqual(persisted.todos.map((todo) => todo.id), ["001-first", "002-second", "003-third"]);
   assert.equal(persisted.maxIterations, 2);
 
-  const result = await ralph.insertTodo({ name: "insert-demo", afterTodoId: 1, title: "Iteration 1.1: Extra work" });
+  const result = await ralph.insertTodo({ name: "insert-demo", id: "001.1-extra-work", insertAtIndex: 1, title: "Iteration 1.1: Extra work" });
   assert.equal(result.dryRun, false);
   assert.deepEqual(result.state.todos.map((todo) => `${todo.id}:${todo.title}:${todo.status}`), [
-    "1:First:queued",
-    "4:Iteration 1.1: Extra work:deferred",
-    "2:Second:queued",
-    "3:Third:deferred",
+    "001-first:First:queued",
+    "001.1-extra-work:Iteration 1.1: Extra work:deferred",
+    "002-second:Second:queued",
+    "003-third:Third:deferred",
   ]);
   assert.equal(result.state.maxIterations, 3);
 
   persisted = await ralph.status("insert-demo");
-  assert.deepEqual(persisted.todos.map((todo) => todo.id), [1, 4, 2, 3]);
+  assert.deepEqual(persisted.todos.map((todo) => todo.id), ["001-first", "001.1-extra-work", "002-second", "003-third"]);
   const plan = await fs.readFile(path.join(cwd, ".ralph", "orchestrator", "loops", "insert-demo", "plan.md"), "utf8");
-  assert.match(plan, /- \[ \] 1\. First \(queued\)\n- \[ \] 4\. Iteration 1\.1: Extra work \(deferred\)\n- \[ \] 2\. Second \(queued\)/);
+  assert.match(plan, /- \[ \] 001-first\. First \(queued\)\n- \[ \] 001\.1-extra-work\. Iteration 1\.1: Extra work \(deferred\)\n- \[ \] 002-second\. Second \(queued\)/);
 });
 
 test("insertTodo refuses to modify a loop with running work", async (t) => {
@@ -223,7 +226,41 @@ test("insertTodo refuses to modify a loop with running work", async (t) => {
   state.todos[0]!.status = "running";
   await fs.writeFile(path.join(cwd, ".ralph", "orchestrator", "loops", "insert-running-demo", "state.json"), `${JSON.stringify(state, null, 2)}\n`, "utf8");
 
-  await assert.rejects(() => ralph.insertTodo({ name: "insert-running-demo", afterTodoId: 1, title: "Extra" }), /while loop is running/);
+  await assert.rejects(() => ralph.insertTodo({ name: "insert-running-demo", id: "001.1-extra", insertAtIndex: 1, title: "Extra" }), /while loop is running/);
+});
+
+test("insertTodo rejects duplicate or empty semantic IDs", async (t) => {
+  const cwd = await createMathFixture();
+  t.after(() => fs.rm(cwd, { recursive: true, force: true }));
+  const ralph = new RalphOrchestrator(cwd);
+  await ralph.start({ name: "insert-id-demo", todos: ["First", "Second"] });
+
+  await assert.rejects(() => ralph.insertTodo({ name: "insert-id-demo", id: " ", title: "Extra" }), /id cannot be empty/);
+  await assert.rejects(() => ralph.insertTodo({ name: "insert-id-demo", id: "001-first", title: "Extra" }), /id already exists/);
+});
+
+test("insertTodo rejects insertion before completed work", async (t) => {
+  const cwd = await createMathFixture();
+  t.after(() => fs.rm(cwd, { recursive: true, force: true }));
+  const ralph = new RalphOrchestrator(cwd);
+  const state = await ralph.start({ name: "insert-complete-demo", todos: ["First", "Second", "Third"] });
+  state.todos[0]!.status = "complete";
+  await fs.writeFile(path.join(cwd, ".ralph", "orchestrator", "loops", "insert-complete-demo", "state.json"), `${JSON.stringify(state, null, 2)}\n`, "utf8");
+
+  await assert.rejects(() => ralph.insertTodo({ name: "insert-complete-demo", id: "000-extra", insertAtIndex: 0, title: "Extra" }), /before completed work/);
+  const result = await ralph.insertTodo({ name: "insert-complete-demo", id: "001.1-extra", insertAtIndex: 1, title: "Extra", dryRun: true });
+  assert.deepEqual(result.state.todos.map((todo) => todo.id), ["001-first", "001.1-extra", "002-second", "003-third"]);
+});
+
+test("insertTodo rejects inconsistent completed todo ordering", async (t) => {
+  const cwd = await createMathFixture();
+  t.after(() => fs.rm(cwd, { recursive: true, force: true }));
+  const ralph = new RalphOrchestrator(cwd);
+  const state = await ralph.start({ name: "insert-inconsistent-demo", todos: ["First", "Second", "Third"] });
+  state.todos[1]!.status = "complete";
+  await fs.writeFile(path.join(cwd, ".ralph", "orchestrator", "loops", "insert-inconsistent-demo", "state.json"), `${JSON.stringify(state, null, 2)}\n`, "utf8");
+
+  await assert.rejects(() => ralph.insertTodo({ name: "insert-inconsistent-demo", id: "001.1-extra", insertAtIndex: 1, title: "Extra" }), /completed todos.*do not form a prefix/);
 });
 
 test("derived status reports needs attention for interrupted tasks", async (t) => {
@@ -373,6 +410,24 @@ test("parseLoopStateJson validates persisted state", () => {
   assert.equal(state.todos[0]?.status, "complete");
   assert.equal(state.iterations[0]?.usage?.totalTokens, 18);
   assert.deepEqual(state.iterations[0]?.changedFiles, ["src/work.ts"]);
+
+  const stringIdState = parseLoopStateJson(JSON.stringify({
+    name: "string-id-demo",
+    control: "active",
+    branch: "orchestrator/string-id-demo",
+    currentIteration: 1,
+    createdAt: "2026-05-27T00:00:00.000Z",
+    updatedAt: "2026-05-27T00:00:00.000Z",
+    todos: [{ id: "001-do-work", title: "Do work", status: "complete" }],
+    iterations: [{
+      number: 1,
+      status: "accepted",
+      todoId: "001-do-work",
+      beforeRef: "refs/ralph/string-id-demo/iter-001-before",
+      startedAt: "2026-05-27T00:00:00.000Z",
+    }],
+  }));
+  assert.equal(stringIdState.iterations[0]?.todoId, "001-do-work");
   assert.throws(() => parseLoopStateJson("{", "bad-state.json"), /Invalid Ralph state JSON in bad-state\.json/);
   assert.throws(() => parseLoopStateJson(JSON.stringify({ name: "bad" }), "bad-state.json"), /required properties control/);
   assert.throws(() => parseLoopStateJson(JSON.stringify({

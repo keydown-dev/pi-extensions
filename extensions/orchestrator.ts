@@ -272,12 +272,13 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "ralph_orchestrator_insert_todo",
     label: "Insert Ralph Todo",
-    description: "Safely insert a deferred todo into an existing Ralph loop after a stable todo ID without renumbering existing todos.",
-    promptSnippet: "Insert a new Ralph todo after a completed iteration/todo; dry-run first when the user wants a preview.",
+    description: "Safely insert a deferred semantic-ID todo into an existing Ralph loop at an array position without renumbering existing todos.",
+    promptSnippet: "Insert a new Ralph todo with an explicit semantic ID at insertAtIndex; dry-run first when the user wants a preview.",
     parameters: Type.Object({
       name: Type.Optional(Type.String({ description: "Loop name. Defaults to the current active loop when available." })),
-      afterTodoId: Type.Number({ description: "Stable internal todo ID to insert after. Existing IDs are preserved." }),
-      title: Type.String({ description: "Title for the new todo, e.g. Iteration 5.1: Complete plans/issues/005.1.md." }),
+      id: Type.String({ description: "Unique semantic todo ID, e.g. 003.1-add-logging or ISSUE-005.1." }),
+      title: Type.String({ description: "Title for the new todo, e.g. Complete plans/issues/005.1.md." }),
+      insertAtIndex: Type.Optional(Type.Number({ description: "Zero-based array insertion position. Omit to append." })),
       status: Type.Optional(Type.Union([Type.Literal("deferred"), Type.Literal("queued")], { description: "Initial status for the inserted todo. Defaults to deferred." })),
       dryRun: Type.Optional(Type.Boolean({ description: "Preview the state change without writing state.json or plan.md." })),
     }),
@@ -285,7 +286,7 @@ export default function (pi: ExtensionAPI) {
       const name = params.name ?? currentLoop;
       if (!name) throw new Error("No Ralph loop name provided and no active loop is set.");
       if (activeJobs.has(name)) throw new Error(`Cannot insert a Ralph todo while loop is running: ${name}. Pause or wait for the active worker to finish first.`);
-      const result = await new RalphOrchestrator(ctx.cwd, packageRoot).insertTodo({ name, afterTodoId: params.afterTodoId, title: params.title, status: params.status, dryRun: params.dryRun });
+      const result = await new RalphOrchestrator(ctx.cwd, packageRoot).insertTodo({ name, id: params.id, title: params.title, insertAtIndex: params.insertAtIndex, status: params.status, dryRun: params.dryRun });
       if (!result.dryRun) updateUI(ctx, result.state);
       return { content: [{ type: "text", text: renderInsertTodoResponse(result) }], details: { ...result, nextAction: result.dryRun ? "If the preview looks correct, call ralph_orchestrator_insert_todo again with dryRun false or omitted." : nextActionForState(result.state) } };
     },
@@ -475,7 +476,7 @@ function renderInsertTodoResponse(result: InsertTodoResult): string {
     .filter((todo) => todo.id !== result.insertedTodo.id)
     .map((todo) => `#${todo.id}`)
     .join(", ");
-  return `${action} Ralph todo #${result.insertedTodo.id} after #${result.afterTodoId}: ${result.insertedTodo.title}\n\nChanges:\n- status: ${result.insertedTodo.status}\n- existing todo IDs preserved: ${preserved || "none"}${maxChange}\n\n${renderStatus(result.state)}\n\nNext action: ${result.dryRun ? "Review the preview, then insert without dryRun if approved." : nextActionForState(result.state)}`;
+  return `${action} Ralph todo #${result.insertedTodo.id} at index ${result.insertAtIndex}: ${result.insertedTodo.title}\n\nChanges:\n- status: ${result.insertedTodo.status}\n- existing todo IDs preserved: ${preserved || "none"}${maxChange}\n\n${renderStatus(result.state)}\n\nNext action: ${result.dryRun ? "Review the preview, then insert without dryRun if approved." : nextActionForState(result.state)}`;
 }
 
 type RalphTheme = ExtensionContext["ui"]["theme"];
@@ -528,7 +529,7 @@ function truncateAnsiToWidth(input: string, width: number): string {
   return output;
 }
 
-function latestIterationForTodo(state: LoopState, todoId: number): LoopState["iterations"][number] | undefined {
+function latestIterationForTodo(state: LoopState, todoId: LoopState["todos"][number]["id"]): LoopState["iterations"][number] | undefined {
   for (let index = state.iterations.length - 1; index >= 0; index--) {
     const iteration = state.iterations[index];
     if (iteration?.todoId === todoId) return iteration;

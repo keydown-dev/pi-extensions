@@ -35,7 +35,7 @@ export class RalphStore {
       createdAt: now,
       updatedAt: now,
       maxIterations,
-      todos: todos.map<RalphTodo>((title, index) => ({ id: index + 1, title, status: initialTodoStatus(index, maxIterations) })),
+      todos: todos.map<RalphTodo>((title, index) => ({ id: semanticTodoId(title, index), title, status: initialTodoStatus(index, maxIterations) })),
       iterations: [],
     };
     await fs.mkdir(path.join(this.getLoopDir(name), "iterations"), { recursive: true });
@@ -110,6 +110,16 @@ function initialTodoStatus(index: number, maxIterations: number | undefined): To
   return maxIterations && index >= maxIterations ? "deferred" : "queued";
 }
 
+function semanticTodoId(title: string, index: number): string {
+  const slug = title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48)
+    .replace(/-+$/g, "") || "todo";
+  return `${String(index + 1).padStart(3, "0")}-${slug}`;
+}
+
 function renderPlan(state: LoopState): string {
   const lines = [`# Ralph loop: ${state.name}`, "", `Control: ${state.control}`, "", "## Todo", ""];
   for (const todo of state.todos) {
@@ -176,7 +186,7 @@ const IterationStateSchema = Type.Object({
     Type.Literal("failed"),
     Type.Literal("aborted"),
   ]),
-  todoId: Type.Optional(Type.Number()),
+  todoId: Type.Optional(Type.Union([Type.String(), Type.Number()])),
   beforeRef: Type.String(),
   afterRef: Type.Optional(Type.String()),
   workerBranch: Type.Optional(Type.String()),
@@ -190,7 +200,7 @@ const IterationStateSchema = Type.Object({
 }, { additionalProperties: false });
 
 const RalphTodoSchema = Type.Object({
-  id: Type.Number(),
+  id: Type.Union([Type.String(), Type.Number()]),
   title: Type.String(),
   status: Type.Union([
     Type.Literal("queued"),

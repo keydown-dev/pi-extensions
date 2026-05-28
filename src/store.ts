@@ -131,11 +131,12 @@ function renderPlan(state: LoopState): string {
 }
 
 function renderHandoffIn(state: LoopState, iteration: IterationState, todo: RalphTodo): string {
-  return `# Ralph handoff-in\n\nLoop: ${state.name}\nIteration: ${iteration.number}\nTodo: ${todo.id}. ${todo.title}\n\n## Task\n\nComplete exactly this todo item. Keep changes bounded and record verification.\n\n## Required output\n\nProduce handoff-out.md and verification.md for this iteration.\n`;
+  return `# Ralph handoff-in\n\nLoop: ${state.name}\nIteration: ${iteration.number}\nTodo: ${todo.id}. ${todo.title}\n\n## Task\n\nComplete exactly this todo item. Keep changes bounded and record verification.\n\n## Required output\n\nProduce handoff-out.md and verification.md for this iteration. Include a ## Commit subject section in handoff-out.md with one short single-line commit subject that follows this project's commit style when you can infer it.\n`;
 }
 
-function renderHandoffOut(iteration: IterationState, result: { summary: string; changedFiles: string[] }): string {
-  return `# Ralph handoff-out\n\nIteration: ${iteration.number}\n\n## Summary\n\n${result.summary}\n\n## Changed files\n\n${result.changedFiles.map((file) => `- ${file}`).join("\n")}\n`;
+function renderHandoffOut(iteration: IterationState, result: { summary: string; changedFiles: string[]; commitSubject?: string }): string {
+  const commitSubject = result.commitSubject ? `\n## Commit subject\n\n${result.commitSubject}\n` : "";
+  return `# Ralph handoff-out\n\nIteration: ${iteration.number}\n\n## Summary\n\n${result.summary}\n\n## Changed files\n\n${result.changedFiles.map((file) => `- ${file}`).join("\n")}\n${commitSubject}`;
 }
 
 function renderVerification(verification: VerificationRecord): string {
@@ -197,6 +198,7 @@ const IterationStateSchema = Type.Object({
   usage: Type.Optional(WorkerUsageSchema),
   summary: Type.Optional(Type.String()),
   changedFiles: Type.Optional(Type.Array(Type.String())),
+  commitSubject: Type.Optional(Type.String()),
 }, { additionalProperties: false });
 
 const RalphTodoSchema = Type.Object({

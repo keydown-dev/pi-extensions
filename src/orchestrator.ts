@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { handoffCommitMessage, workerCommitMessage } from "./commit-messages.js";
 import { afterRef, beforeRef, GitPolicy, orchestrationBranch } from "./git.js";
 import { slugifyLoopName } from "./paths.js";
 import { killRalphWorkerProcesses, PiJsonWorkerRunner } from "./pi-json-worker.js";
@@ -151,7 +152,7 @@ export class RalphOrchestrator {
     await fs.writeFile(path.join(this.store.getIterationDir(state.name, iterationNumber), "git-before.txt"), await this.git.captureStatus(), "utf8");
     await this.store.writeState(state);
     options.onProgress?.({ state, message: `Started Ralph iteration ${iterationNumber}: ${todo.title}` });
-    await this.git.addAllAndCommit(`handoff: iteration ${String(iterationNumber).padStart(3, "0")} context`);
+    await this.git.addAllAndCommit(handoffCommitMessage(todo.id, iterationNumber));
 
     const forwardWorkerProgress = (progress: WorkerProgress): void => {
       void (async () => {
@@ -177,6 +178,7 @@ export class RalphOrchestrator {
     iteration.usage = result.usage;
     iteration.summary = result.summary;
     iteration.changedFiles = result.changedFiles;
+    iteration.commitSubject = result.commitSubject;
     const latest = await this.store.readState(state.name);
     const externallyPaused = latest.control === "paused";
     const killed = /ralph-kill/i.test(result.verification.notes ?? "") || result.verification.commands.some((command) => /ralph-kill/i.test(command.summary));
@@ -201,7 +203,7 @@ export class RalphOrchestrator {
     await fs.writeFile(path.join(this.store.getIterationDir(state.name, iterationNumber), "git-after.txt"), await this.git.captureStatus(), "utf8");
     await this.store.writeState(state);
     options.onProgress?.({ state, message: `Finished Ralph iteration ${iterationNumber} with ${result.verification.status}` });
-    await this.git.addAllAndCommit(`worker: iteration ${String(iterationNumber).padStart(3, "0")} changes`);
+    await this.git.addAllAndCommit(workerCommitMessage(todo.id, iterationNumber, result.commitSubject));
     await this.git.createRef(iteration.afterRef);
     await options.onIterationComplete?.({ state, iteration, todo, result });
 

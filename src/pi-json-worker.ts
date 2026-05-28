@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { type ChildProcess, spawn } from "node:child_process";
+import { extractCommitSubjectFromHandoff } from "./commit-messages.js";
 import type { VerificationRecord, WorkerInput, WorkerProgress, WorkerResult, WorkerUsage } from "./types.js";
 
 export class PiJsonWorkerRunner {
@@ -53,6 +54,7 @@ export class PiJsonWorkerRunner {
       summary: extractSummary(handoffText),
       changedFiles: extractChangedFiles(handoffText),
       verification: parseVerification(verificationText),
+      commitSubject: extractCommitSubjectFromHandoff(handoffText),
       usage,
     };
   }
@@ -77,6 +79,7 @@ Important constraints:
 - Keep context small: read the handoff first, then inspect only referenced or necessary files.
 - If blocked, write handoff-out.md and verification.md explaining the blocker.
 - Before finishing, ensure verification.md has a line like: Status: passed OR Status: failed OR Status: not_run.
+- Include a ## Commit subject section in handoff-out.md with one short single-line commit subject that follows this project's commit style when you can infer it.
 - Do not start the next Ralph iteration.`;
   }
 }

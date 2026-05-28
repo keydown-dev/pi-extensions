@@ -11,6 +11,7 @@ At the end of a Ralph worker iteration, report in durable files rather than rely
 
 - summary
 - changed files
+- commit subject: one short single-line subject matching project commit style when inferable
 - verification performed
 - decisions made
 - risks or blockers

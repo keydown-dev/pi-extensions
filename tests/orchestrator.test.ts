@@ -5,6 +5,7 @@ import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import test from "node:test";
+import { extractCommitSubjectFromHandoff, handoffCommitMessage, sanitizeWorkerCommitSubject, workerCommitMessage } from "../src/commit-messages.js";
 import { GitPolicy } from "../src/git.js";
 import { deriveLoopStatus, RalphOrchestrator, renderStatus } from "../src/orchestrator.js";
 import { parseLoopStateJson } from "../src/store.js";
@@ -48,6 +49,51 @@ test("scripted Ralph loop adds tests and implementations over three iterations",
   const refs = (await execFileAsync("git", ["show-ref"], { cwd })).stdout;
   assert.match(refs, /refs\/ralph\/math-kata\/iter-001-before/);
   assert.match(refs, /refs\/ralph\/math-kata\/iter-003-after/);
+});
+
+test("pi-json worker commit uses parsed handoff commit subject", async (t) => {
+  const cwd = await createMathFixture();
+  t.after(() => fs.rm(cwd, { recursive: true, force: true }));
+  const binDir = await fs.mkdtemp(path.join(os.tmpdir(), "ralph-fake-pi-"));
+  t.after(() => fs.rm(binDir, { recursive: true, force: true }));
+  const originalPath = process.env.PATH;
+  process.env.PATH = `${binDir}${path.delimiter}${originalPath ?? ""}`;
+  t.after(() => {
+    process.env.PATH = originalPath;
+  });
+  await fs.writeFile(path.join(binDir, "pi"), `#!/usr/bin/env node
+import fs from "node:fs";
+import path from "node:path";
+const prompt = process.argv[process.argv.length - 1] ?? "";
+const outputs = [...prompt.matchAll(/- (\\S+\\.md)/g)].map((match) => match[1]);
+const handoffOut = outputs.find((file) => file.endsWith("handoff-out.md"));
+const verification = outputs.find((file) => file.endsWith("verification.md"));
+fs.appendFileSync(path.join(process.cwd(), "src", "math.js"), "\\nexport const fakePiWorkerTouched = true;\\n");
+fs.writeFileSync(handoffOut, "# Ralph handoff-out\\n\\n## Summary\\n\\nTouched math module.\\n\\n## Changed files\\n\\n- src/math.js\\n\\n## Commit subject\\n\\nfeat: touch math from fake pi\\n");
+fs.writeFileSync(verification, "# Verification\\n\\nStatus: passed\\n\\n## Commands\\n\\n- fake pi passed\\n");
+console.log(JSON.stringify({ type: "message_end", message: { role: "assistant", usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2 } } }));
+`, { mode: 0o755 });
+
+  const ralph = new RalphOrchestrator(cwd);
+  const state = await ralph.start({ name: "commit-subject-demo", todos: ["Touch math module"] });
+  const finalState = await ralph.run("commit-subject-demo", { maxIterations: 1 });
+
+  assert.match(await fs.readFile(path.join(cwd, ".ralph", "orchestrator", "loops", state.name, "iterations", "001", "handoff-in.md"), "utf8"), /## Commit subject/);
+  assert.equal(finalState.iterations[0]?.commitSubject, "feat: touch math from fake pi");
+  const log = (await execFileAsync("git", ["log", "--format=%s"], { cwd })).stdout;
+  assert.match(log, /feat: touch math from fake pi/);
+});
+
+test("commit message helpers use semantic todo identity and sanitized worker subjects", () => {
+  assert.equal(handoffCommitMessage("ISSUE-005.1", 6), "handoff: ISSUE-005.1 context");
+  assert.equal(handoffCommitMessage(undefined, 6), "handoff: iteration 006 context");
+  assert.equal(workerCommitMessage("ISSUE-005.1", 6), "worker: ISSUE-005.1 changes");
+  assert.equal(workerCommitMessage(undefined, 6), "worker: iteration 006 changes");
+  assert.equal(workerCommitMessage("ISSUE-005.1", 6, "  feat: add progress UI  "), "feat: add progress UI");
+  assert.equal(sanitizeWorkerCommitSubject("feat: add x\n\nbody"), undefined);
+  assert.equal(sanitizeWorkerCommitSubject("x".repeat(121)), undefined);
+  assert.equal(extractCommitSubjectFromHandoff("## Commit subject\n\nfix: handle pause\n\n## Risks\n\nNone"), "fix: handle pause");
+  assert.equal(extractCommitSubjectFromHandoff("## Commit subject\n\nfix: line one\nfix: line two"), undefined);
 });
 
 test("start refuses dirty worktrees", async (t) => {

@@ -60,6 +60,7 @@ export interface IterationState {
   usage?: WorkerUsage;
   summary?: string;
   changedFiles?: string[];
+  commitSubject?: string;
 }
 
 export interface LoopState {
@@ -146,5 +147,6 @@ export interface WorkerResult {
   summary: string;
   changedFiles: string[];
   verification: VerificationRecord;
+  commitSubject?: string;
   usage?: WorkerUsage;
 }

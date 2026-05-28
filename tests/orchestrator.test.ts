@@ -580,8 +580,70 @@ test("orchestrator artifacts are created under ignored .ralph/orchestrator", asy
   await ralph.start({ name: "ignored-artifacts", todos: ["Add subtract test and implementation"] });
 
   await fs.access(path.join(cwd, ".ralph", "orchestrator", "loops", "ignored-artifacts", "state.json"));
+  const ralphGitignore = await fs.readFile(path.join(cwd, ".ralph", ".gitignore"), "utf8");
+  assert.match(ralphGitignore, /worker-output\.raw\.jsonl/);
+  assert.match(ralphGitignore, /worker-output\.raw\.jsonl\.\*/);
   const trackedArtifacts = (await execFileAsync("git", ["ls-files", ".ralph", ".ralph-orchestrator"], { cwd })).stdout.trim();
   assert.equal(trackedArtifacts, "");
+});
+
+test("ralph gitignore generation is idempotent and preserves custom rules", async (t) => {
+  const cwd = await createMathFixture();
+  t.after(() => fs.rm(cwd, { recursive: true, force: true }));
+  await fs.mkdir(path.join(cwd, ".ralph"), { recursive: true });
+  await fs.writeFile(path.join(cwd, ".ralph", ".gitignore"), "custom-local-file\nworker-output.raw.jsonl\n", "utf8");
+
+  const ralph = new RalphOrchestrator(cwd);
+  await ralph.start({ name: "gitignore-idempotent", todos: ["Add subtract test and implementation"] });
+  await ralph.run("gitignore-idempotent", { maxIterations: 1, workerMode: "scripted" });
+
+  const ralphGitignore = await fs.readFile(path.join(cwd, ".ralph", ".gitignore"), "utf8");
+  assert.match(ralphGitignore, /^custom-local-file$/m);
+  assert.equal((ralphGitignore.match(/^worker-output\.raw\.jsonl$/gm) ?? []).length, 1);
+  assert.equal((ralphGitignore.match(/^worker-output\.raw\.jsonl\.\*$/gm) ?? []).length, 1);
+});
+
+test("tracked ralph artifacts commit compact output but exclude raw traces", async (t) => {
+  const cwd = await createMathFixture();
+  t.after(() => fs.rm(cwd, { recursive: true, force: true }));
+  await fs.writeFile(path.join(cwd, ".gitignore"), ".ralph-orchestrator/\n.tmp/\n", "utf8");
+  await execFileAsync("git", ["add", "-A"], { cwd });
+  await execFileAsync("git", ["commit", "-m", "track ralph artifacts"], { cwd });
+
+  const binDir = await fs.mkdtemp(path.join(os.tmpdir(), "ralph-fake-pi-"));
+  t.after(() => fs.rm(binDir, { recursive: true, force: true }));
+  const originalPath = process.env.PATH;
+  const originalRaw = process.env.RALPH_WORKER_RAW_OUTPUT;
+  process.env.PATH = `${binDir}${path.delimiter}${originalPath ?? ""}`;
+  process.env.RALPH_WORKER_RAW_OUTPUT = "1";
+  t.after(() => {
+    process.env.PATH = originalPath;
+    if (originalRaw === undefined) delete process.env.RALPH_WORKER_RAW_OUTPUT;
+    else process.env.RALPH_WORKER_RAW_OUTPUT = originalRaw;
+  });
+  await fs.writeFile(path.join(binDir, "pi"), `#!/usr/bin/env node
+import fs from "node:fs";
+import path from "node:path";
+const prompt = process.argv[process.argv.length - 1] ?? "";
+const outputs = [...prompt.matchAll(/- (\\S+\\.md)/g)].map((match) => match[1]);
+const handoffOut = outputs.find((file) => file.endsWith("handoff-out.md"));
+const verification = outputs.find((file) => file.endsWith("verification.md"));
+fs.appendFileSync(path.join(process.cwd(), "src", "math.js"), "\\nexport const rawTraceExcluded = true;\\n");
+fs.writeFileSync(handoffOut, "# Ralph handoff-out\\n\\n## Summary\\n\\nTouched math module.\\n\\n## Changed files\\n\\n- src/math.js\\n\\n## Commit subject\\n\\nfeat: exclude raw trace\\n");
+fs.writeFileSync(verification, "# Verification\\n\\nStatus: passed\\n\\n## Commands\\n\\n- fake pi passed\\n");
+console.log(JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "delta", partial: { content: [{ type: "text", text: "raw token" }] } } }));
+console.log(JSON.stringify({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "Done." }], usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2 } } }));
+`, { mode: 0o755 });
+
+  const ralph = new RalphOrchestrator(cwd);
+  const state = await ralph.start({ name: "tracked-artifacts", todos: ["Touch math module"] });
+  await ralph.run("tracked-artifacts", { maxIterations: 1 });
+
+  const tracked = (await execFileAsync("git", ["ls-files", ".ralph"], { cwd })).stdout;
+  assert.match(tracked, /\.ralph\/.gitignore/);
+  assert.match(tracked, /worker-output\.jsonl/);
+  assert.doesNotMatch(tracked, /worker-output\.raw\.jsonl/);
+  await fs.access(path.join(cwd, ".ralph", "orchestrator", "loops", state.name, "iterations", "001", "worker-output.raw.jsonl"));
 });
 
 const plainTheme = {

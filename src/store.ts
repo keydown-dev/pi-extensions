@@ -39,6 +39,7 @@ export class RalphStore {
       iterations: [],
     };
     await fs.mkdir(path.join(this.getLoopDir(name), "iterations"), { recursive: true });
+    await ensureRalphArtifactGitignore(this.cwd);
     await fs.writeFile(path.join(this.getLoopDir(name), "plan.md"), renderPlan(state), "utf8");
     await fs.writeFile(path.join(this.getLoopDir(name), "decisions.md"), `# Decisions: ${state.name}\n\n`, "utf8");
     await this.writeState(state);
@@ -74,6 +75,7 @@ export class RalphStore {
   async writeState(state: LoopState): Promise<void> {
     state.updatedAt = new Date().toISOString();
     await fs.mkdir(this.getLoopDir(state.name), { recursive: true });
+    await ensureRalphArtifactGitignore(this.cwd);
     await fs.writeFile(statePath(this.cwd, state.name), `${JSON.stringify(state, null, 2)}\n`, "utf8");
     await fs.writeFile(path.join(this.getLoopDir(state.name), "plan.md"), renderPlan(state), "utf8");
   }
@@ -147,6 +149,27 @@ function renderVerification(verification: VerificationRecord): string {
   if (verification.notes) lines.push("", "## Notes", "", verification.notes);
   lines.push("");
   return lines.join("\n");
+}
+
+const RALPH_ARTIFACT_GITIGNORE = `# Ralph-managed local diagnostics\nworker-output.raw.jsonl\nworker-output.raw.jsonl.*\n*.raw.jsonl\n*.raw.jsonl.*\n`;
+
+async function ensureRalphArtifactGitignore(cwd: string): Promise<void> {
+  const root = path.join(cwd, ".ralph");
+  const gitignorePath = path.join(root, ".gitignore");
+  await fs.mkdir(root, { recursive: true });
+  let existing = "";
+  try {
+    existing = await fs.readFile(gitignorePath, "utf8");
+  } catch {
+    // Create the file below.
+  }
+
+  const existingLines = new Set(existing.split(/\r?\n/));
+  const missingLines = RALPH_ARTIFACT_GITIGNORE.split("\n").filter((line) => line && !existingLines.has(line));
+  if (missingLines.length === 0) return;
+
+  const prefix = existing.length === 0 || existing.endsWith("\n") ? "" : "\n";
+  await fs.writeFile(gitignorePath, `${existing}${prefix}${missingLines.join("\n")}\n`, "utf8");
 }
 
 const VerificationRecordSchema = Type.Object({

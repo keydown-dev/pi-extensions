@@ -102,10 +102,22 @@ export class GitPolicy {
 
   async addAllAndCommit(message: string): Promise<boolean> {
     await this.run(["add", "-A"]);
+    await this.unstageRawRalphWorkerTraces();
     const staged = await this.run(["diff", "--cached", "--name-only"]);
     if (!staged.trim()) return false;
     await this.run(["commit", "-m", message]);
     return true;
+  }
+
+  private async unstageRawRalphWorkerTraces(): Promise<void> {
+    const staged = await this.run(["diff", "--cached", "--name-only"], { trim: false });
+    const rawTracePaths = staged
+      .split("\n")
+      .map((line) => line.trimEnd())
+      .filter(Boolean)
+      .filter(isRawRalphWorkerTracePath);
+    if (rawTracePaths.length === 0) return;
+    await this.run(["reset", "-q", "HEAD", "--", ...rawTracePaths]);
   }
 
   private async isTracked(filePath: string): Promise<boolean> {
@@ -138,6 +150,10 @@ function parseNumstatCount(value: string | undefined): number {
 function isIgnoredStatusLine(line: string, ignorePrefixes: string[]): boolean {
   const pathPart = line.slice(3);
   return ignorePrefixes.some((prefix) => pathPart === prefix || pathPart.startsWith(prefix.endsWith("/") ? prefix : `${prefix}/`));
+}
+
+function isRawRalphWorkerTracePath(filePath: string): boolean {
+  return filePath.startsWith(".ralph/") && /(^|\/)worker-output\.raw\.jsonl(?:\..*)?$/.test(filePath);
 }
 
 function cleanDeclaredPaths(paths: string[], excludePrefixes: string[]): string[] {

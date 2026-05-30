@@ -409,11 +409,11 @@ test("Ralph widget header only shows loop name", () => {
   assert.doesNotMatch(output, /ready|completed|Iteration|Todos 1\/3|\/5/);
 });
 
-test("Ralph widget paginates long todo lists around current work", () => {
+test("Ralph widget expanded mode renders all todos without crop dividers", () => {
   const state = parseLoopStateJson(JSON.stringify({
-    name: "widget-pagination-demo",
+    name: "widget-expanded-demo",
     control: "active",
-    branch: "orchestrator/widget-pagination-demo",
+    branch: "orchestrator/widget-expanded-demo",
     currentIteration: 3,
     createdAt: "2026-05-27T00:00:00.000Z",
     updatedAt: "2026-05-27T00:00:00.000Z",
@@ -430,24 +430,22 @@ test("Ralph widget paginates long todo lists around current work", () => {
     iterations: [],
   }));
 
-  const output = renderRalphWidget(state, undefined, plainTheme as never, 80).join("\n");
-  assert.match(output, /↑ 1 more/);
-  assert.match(output, /#2 Latest done[\s\S]*#3 Current work/);
-  assert.match(output, /↓ 2 more/);
-  assert.doesNotMatch(output, /#1 First done|#7 Hidden future|#8 Also hidden/);
+  const output = renderRalphWidget(state, undefined, plainTheme as never, 80, "expanded").join("\n");
+  assert.match(output, /#1 First done[\s\S]*#8 Also hidden/);
+  assert.doesNotMatch(output, /↑ \d+ more|↓ \d+ more/);
 });
 
-test("Ralph widget dividers use border blue instead of accent", () => {
+test("Ralph widget compact mode shows focused todo and header badges", () => {
   const state = parseLoopStateJson(JSON.stringify({
-    name: "widget-border-demo",
+    name: "widget-compact-demo",
     control: "active",
-    branch: "orchestrator/widget-border-demo",
+    branch: "orchestrator/widget-compact-demo",
     currentIteration: 3,
     createdAt: "2026-05-27T00:00:00.000Z",
     updatedAt: "2026-05-27T00:00:00.000Z",
     todos: [
       { id: 1, title: "First done", status: "complete" },
-      { id: 2, title: "Latest done", status: "complete" },
+      { id: 2, title: "Problem", status: "failed" },
       { id: 3, title: "Current work", status: "running" },
       { id: 4, title: "Next work", status: "queued" },
       { id: 5, title: "Later work", status: "deferred" },
@@ -456,9 +454,29 @@ test("Ralph widget dividers use border blue instead of accent", () => {
     iterations: [],
   }));
 
-  const output = renderRalphWidget(state, undefined, taggedTheme as never, 40).join("\n");
+  const output = renderRalphWidget(state, undefined, plainTheme as never, 120, "compact").join("\n");
+  assert.match(output, /↑1 ✓/);
+  assert.match(output, /↑1 ✗/);
+  assert.match(output, /↓1 ○/);
+  assert.match(output, /↓2 ◌/);
+  assert.match(output, /#3 Current work/);
+  assert.doesNotMatch(output, /#1 First done|#2 Problem|#4 Next work|#5 Later work|#6 Future work|more/);
+});
+
+test("Ralph widget dividers use border blue instead of accent", () => {
+  const state = parseLoopStateJson(JSON.stringify({
+    name: "widget-border-demo",
+    control: "active",
+    branch: "orchestrator/widget-border-demo",
+    currentIteration: 1,
+    createdAt: "2026-05-27T00:00:00.000Z",
+    updatedAt: "2026-05-27T00:00:00.000Z",
+    todos: [{ id: 1, title: "Current work", status: "running" }],
+    iterations: [],
+  }));
+
+  const output = renderRalphWidget(state, undefined, taggedTheme as never, 40, "expanded").join("\n");
   assert.match(output, /<border>─+/);
-  assert.match(output, /<border>.*↑ 1 more/);
   assert.doesNotMatch(output, /<accent>─+/);
 });
 

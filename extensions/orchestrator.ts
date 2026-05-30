@@ -6,31 +6,44 @@ import { deriveLoopStatus, RalphOrchestrator, renderLoopList, renderStatus } fro
 import type { InsertTodoResult, IterationCompleteEvent, LoopState, OrchestratorProgress, WorkerMode, WorkerProgress, WorkerUsage } from "../src/types.js";
 
 let currentLoop: string | null = null;
-let ralphWidgetVisible = true;
+type RalphWidgetMode = "compact" | "expanded" | "hidden";
+let ralphWidgetMode: RalphWidgetMode = "compact";
 let latestWidgetState: LoopState | null = null;
 let latestWidgetWorker: WorkerProgress | undefined;
+let lastHiddenWidgetSignature: string | null = null;
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const activeJobs = new Map<string, Promise<void>>();
 
 export default function (pi: ExtensionAPI) {
   function setCurrent(ctx: ExtensionContext, state: LoopState | null): void {
     currentLoop = state?.name ?? null;
+    if (state && deriveLoopStatus(state) !== "completed" && ralphWidgetMode === "hidden") ralphWidgetMode = "compact";
     updateUI(ctx, state);
   }
 
   function updateUI(ctx: ExtensionContext, state?: LoopState | null, worker?: WorkerProgress): void {
     latestWidgetState = state ?? null;
     latestWidgetWorker = worker;
+    if (state && ralphWidgetMode === "hidden") {
+      const signature = widgetStateSignature(state);
+      if (lastHiddenWidgetSignature && signature !== lastHiddenWidgetSignature) {
+        ralphWidgetMode = "compact";
+        lastHiddenWidgetSignature = null;
+      } else {
+        lastHiddenWidgetSignature = signature;
+      }
+    }
     if (!ctx.hasUI) return;
     ctx.ui.setStatus("ralph", undefined);
-    if (!state || !ralphWidgetVisible) {
+    if (!state || ralphWidgetMode === "hidden") {
       ctx.ui.setWidget("ralph", undefined);
       return;
     }
+    const visibleMode = ralphWidgetMode;
     ctx.ui.setWidget("ralph", (tui, widgetTheme) => {
       const interval = state.todos.some((todo) => todo.status === "running") ? setInterval(() => tui.requestRender(), PI_WORKING_SPINNER_INTERVAL_MS) : undefined;
       return {
-        render: (width: number) => renderRalphWidget(state, worker, widgetTheme, width),
+        render: (width: number) => renderRalphWidget(state, worker, widgetTheme, width, visibleMode),
         invalidate: () => {},
         dispose: () => {
           if (interval) clearInterval(interval);
@@ -46,18 +59,41 @@ export default function (pi: ExtensionAPI) {
     };
   }
 
-  function setWidgetVisible(ctx: ExtensionContext, visible: boolean): void {
-    ralphWidgetVisible = visible;
+  async function setWidgetMode(ctx: ExtensionContext, mode: RalphWidgetMode): Promise<void> {
+    if (mode !== "hidden" && !(await ensureNonCompleteLoopForWidget(ctx))) return;
+    ralphWidgetMode = mode;
+    lastHiddenWidgetSignature = mode === "hidden" && latestWidgetState ? widgetStateSignature(latestWidgetState) : null;
     updateUI(ctx, latestWidgetState, latestWidgetWorker);
-    ctx.ui.notify(`Ralph widget ${visible ? "shown" : "hidden"}. Ctrl+Opt+R toggles it.`, "info");
+    ctx.ui.notify(`Ralph widget ${mode}.`, "info");
   }
 
-  function toggleWidget(args: string, ctx: ExtensionContext): void {
+  async function densityToggleWidget(ctx: ExtensionContext): Promise<void> {
+    if (!(await ensureNonCompleteLoopForWidget(ctx))) return;
+    await setWidgetMode(ctx, ralphWidgetMode === "expanded" ? "compact" : "expanded");
+  }
+
+  async function ensureNonCompleteLoopForWidget(ctx: ExtensionContext): Promise<boolean> {
+    if (latestWidgetState && deriveLoopStatus(latestWidgetState) !== "completed") return true;
+    const states = await new RalphOrchestrator(ctx.cwd, packageRoot).list();
+    const active = states.find((state) => deriveLoopStatus(state) === "running") ?? states.find((state) => deriveLoopStatus(state) === "ready") ?? states.find((state) => deriveLoopStatus(state) === "needs_attention") ?? states.find((state) => deriveLoopStatus(state) === "paused") ?? null;
+    if (active) {
+      currentLoop = active.name;
+      latestWidgetState = active;
+      return true;
+    }
+    ctx.ui.notify(`No non-complete Ralph loop detected. Available loops:\n${renderLoopList(states)}`, "info");
+    updateUI(ctx, null);
+    return false;
+  }
+
+  async function toggleWidget(args: string, ctx: ExtensionContext): Promise<void> {
     const mode = splitArgs(args)[0]?.toLowerCase();
-    if (mode === "show" || mode === "on") return setWidgetVisible(ctx, true);
-    if (mode === "hide" || mode === "off") return setWidgetVisible(ctx, false);
-    if (mode && mode !== "toggle") throw new Error("Usage: /ralph-widget [toggle|show|hide]");
-    setWidgetVisible(ctx, !ralphWidgetVisible);
+    if (mode === "show" || mode === "on") return setWidgetMode(ctx, "expanded");
+    if (mode === "hide" || mode === "off") return setWidgetMode(ctx, "hidden");
+    if (mode === "compact" || mode === "collapse" || mode === "collapsed") return setWidgetMode(ctx, "compact");
+    if (mode === "expanded" || mode === "expand" || mode === "full") return setWidgetMode(ctx, "expanded");
+    if (mode && mode !== "toggle") throw new Error("Usage: /ralph-widget [toggle|compact|expanded|show|hide]");
+    return densityToggleWidget(ctx);
   }
 
   function postIterationSummary(event: IterationCompleteEvent): void {
@@ -161,18 +197,18 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("ralph-list", command("List Ralph orchestrator loops", showList));
   pi.registerCommand("ralph-run", command("Run one or more Ralph worker iterations", runLoop));
   pi.registerCommand("ralph-widget", {
-    description: "Show, hide, or toggle the Ralph state widget",
+    description: "Set Ralph widget mode (compact, expanded, or hidden)",
     handler: async (args, ctx) => {
       try {
-        toggleWidget(args, ctx);
+        await toggleWidget(args, ctx);
       } catch (error) {
         ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
       }
     },
   });
   pi.registerShortcut("ctrl+alt+r", {
-    description: "Show/hide the Ralph widget",
-    handler: async (ctx) => setWidgetVisible(ctx, !ralphWidgetVisible),
+    description: "Expand/contract the Ralph widget",
+    handler: async (ctx) => densityToggleWidget(ctx),
   });
 
   pi.registerCommand("ralph-plan", {
@@ -367,6 +403,7 @@ export default function (pi: ExtensionAPI) {
     const states = await new RalphOrchestrator(ctx.cwd, packageRoot).list();
     const active = states.find((state) => deriveLoopStatus(state) === "running") ?? states.find((state) => deriveLoopStatus(state) === "ready") ?? null;
     currentLoop = active?.name ?? null;
+    ralphWidgetMode = active ? "compact" : "hidden";
     updateUI(ctx, active);
   });
 }
@@ -394,7 +431,7 @@ Primary commands:
   /ralph-kill [name]                               Kill the current Ralph worker process and pause
   /ralph-status [name]                             Show current or named loop status
   /ralph-list                                      List all loops
-  /ralph-widget [toggle|show|hide]                 Show or hide the Ralph widget (Ctrl+Opt+R)
+  /ralph-widget [toggle|compact|expanded|show|hide] Set Ralph widget mode (Ctrl+Opt+R expands/contracts)
 
 Natural usage:
   Ask: "Can we set up a ralph loop to get through our issues? Max of 5 loops."`;
@@ -483,17 +520,27 @@ type RalphTheme = ExtensionContext["ui"]["theme"];
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const PI_WORKING_SPINNER_INTERVAL_MS = 80;
 
-export function renderRalphWidget(state: LoopState, worker: WorkerProgress | undefined, theme: RalphTheme, width: number): string[] {
+export function renderRalphWidget(state: LoopState, worker: WorkerProgress | undefined, theme: RalphTheme, width: number, mode: Exclude<RalphWidgetMode, "hidden"> = "expanded"): string[] {
   const rule = widgetRule(theme, width);
-  const lines: string[] = [rule, theme.fg("accent", theme.bold(`Ralph Loop · ${state.name}`)), ""];
-  const visibleTodos = paginatedTodos(state.todos);
+  const header = mode === "compact" ? renderCompactHeader(state, theme) : theme.fg("accent", theme.bold(`Ralph Loop · ${state.name}`));
+  const lines: string[] = [rule, header, ""];
 
-  if (visibleTodos.hiddenBefore > 0) lines.push(widgetCropIndicator("up", visibleTodos.hiddenBefore, theme, width), "");
+  const todos = mode === "compact" ? selectedCompactTodo(state.todos) : state.todos;
+  renderTodoRows(lines, state, todos, worker, theme);
 
-  for (const todo of visibleTodos.todos) {
+  lines.push(rule);
+  lines.push(theme.fg("dim", mode === "compact" ? "Ctrl+Opt+R Expand · /ralph-widget hide to dismiss" : "Ctrl+Opt+R Compact · Chat to pause, resume, steer, or kill the loop."));
+  return lines.map((line) => truncateAnsiToWidth(line, width));
+}
+
+type WidgetTodo = LoopState["todos"][number];
+
+function renderTodoRows(lines: string[], state: LoopState, todos: WidgetTodo[], worker: WorkerProgress | undefined, theme: RalphTheme): void {
+  for (const todo of todos) {
     const iteration = latestIterationForTodo(state, todo.id);
     const isRunning = todo.status === "running";
-    const prefix = isRunning ? theme.fg("accent", "› ") : "  ";
+    const isSelected = isRunning || todos.length === 1;
+    const prefix = isSelected ? theme.fg("accent", "› ") : "  ";
     const icon = todoGlyph(todo.status);
     const iconColor = todo.status === "complete" ? "success" : todo.status === "failed" || todo.status === "interrupted" ? "error" : todo.status === "running" ? "accent" : "dim";
     const titleColor = todo.status === "running" ? "accent" : "text";
@@ -501,52 +548,57 @@ export function renderRalphWidget(state: LoopState, worker: WorkerProgress | und
     lines.push(`  ${renderTodoDetail(todo.status, iteration, isRunning ? worker : undefined, theme)}`);
     lines.push("");
   }
-
-  if (visibleTodos.hiddenAfter > 0) lines.push(widgetCropIndicator("down", visibleTodos.hiddenAfter, theme, width), "");
-
-  lines.push(rule);
-  lines.push(theme.fg("dim", "Ctrl+Opt+R Show/Hide · Chat to pause, resume, steer, or kill the loop."));
-  return lines.map((line) => truncateAnsiToWidth(line, width));
 }
 
-type WidgetTodo = LoopState["todos"][number];
-
-function paginatedTodos(todos: WidgetTodo[]): { todos: WidgetTodo[]; hiddenBefore: number; hiddenAfter: number } {
-  const maxVisible = 5;
-  if (todos.length <= maxVisible) return { todos, hiddenBefore: 0, hiddenAfter: 0 };
-
-  const runningIndex = todos.findIndex((todo) => todo.status === "running");
-  const lastCompletedIndex = findLastIndex(todos, (todo) => todo.status === "complete");
-  let start = lastCompletedIndex >= 0 ? lastCompletedIndex : runningIndex >= 0 ? Math.max(0, runningIndex - 1) : 0;
-
-  if (runningIndex >= 0 && runningIndex !== start + 1) {
-    start = Math.max(0, runningIndex - 1);
-  }
-
-  return {
-    todos: todos.slice(start, start + maxVisible),
-    hiddenBefore: start,
-    hiddenAfter: Math.max(0, todos.length - start - maxVisible),
-  };
+function selectedCompactTodo(todos: WidgetTodo[]): WidgetTodo[] {
+  const selected = todos.find((todo) => todo.status === "running")
+    ?? todos.find((todo) => todo.status === "failed" || todo.status === "interrupted")
+    ?? findLast(todos, (todo) => todo.status === "complete")
+    ?? todos.find((todo) => todo.status === "queued" || todo.status === "deferred")
+    ?? todos[0];
+  return selected ? [selected] : [];
 }
 
-function findLastIndex<T>(items: T[], predicate: (item: T) => boolean): number {
+function renderCompactHeader(state: LoopState, theme: RalphTheme): string {
+  const selected = selectedCompactTodo(state.todos)[0];
+  const badges = selected ? compactBadges(state.todos, selected, theme) : [];
+  const suffix = badges.length ? `    ${badges.join(" ")}` : "";
+  return theme.fg("accent", theme.bold(`Ralph Loop · ${state.name}`)) + suffix;
+}
+
+function compactBadges(todos: WidgetTodo[], selected: WidgetTodo, theme: RalphTheme): string[] {
+  const selectedIndex = todos.indexOf(selected);
+  const before = todos.slice(0, selectedIndex);
+  const after = todos.slice(selectedIndex + 1);
+  const counts = [
+    { count: before.filter((todo) => todo.status === "complete").length, text: "↑", glyph: "✓", color: "success" },
+    { count: before.filter((todo) => todo.status === "failed" || todo.status === "interrupted").length, text: "↑", glyph: "✗", color: "error" },
+    { count: after.filter((todo) => todo.status === "queued").length, text: "↓", glyph: "○", color: "accent" },
+    { count: after.filter((todo) => todo.status === "deferred").length, text: "↓", glyph: "◌", color: "dim" },
+  ] as const;
+  return counts.filter((badge) => badge.count > 0).map((badge) => theme.fg(badge.color, `${badge.text}${badge.count} ${badge.glyph}`));
+}
+
+function findLast<T>(items: T[], predicate: (item: T) => boolean): T | undefined {
   for (let index = items.length - 1; index >= 0; index--) {
-    if (predicate(items[index]!)) return index;
+    if (predicate(items[index]!)) return items[index];
   }
-  return -1;
+  return undefined;
 }
 
 function widgetRule(theme: RalphTheme, width: number): string {
   return theme.fg("border", "─".repeat(Math.max(0, width)));
 }
 
-function widgetCropIndicator(direction: "up" | "down", hiddenCount: number, theme: RalphTheme, width: number): string {
-  const label = ` ${direction === "up" ? "↑" : "↓"} ${hiddenCount} more `;
-  const remaining = Math.max(0, width - label.length);
-  const left = "─".repeat(Math.floor(remaining / 2));
-  const right = "─".repeat(Math.ceil(remaining / 2));
-  return theme.fg("border", `${left}${label}${right}`);
+function widgetStateSignature(state: LoopState): string {
+  return JSON.stringify({
+    name: state.name,
+    control: state.control,
+    currentIteration: state.currentIteration,
+    updatedAt: state.updatedAt,
+    todos: state.todos.map((todo) => [todo.id, todo.status]),
+    iterations: state.iterations.map((iteration) => [iteration.number, iteration.status, iteration.completedAt, iteration.verification?.status]),
+  });
 }
 
 function truncateAnsiToWidth(input: string, width: number): string {

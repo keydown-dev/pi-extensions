@@ -387,7 +387,7 @@ test("completion callback is emitted before the next iteration starts", async (t
   assert.deepEqual(events, ["start:1", "complete:1:passed", "start:2", "complete:2:passed"]);
 });
 
-test("Ralph widget header only shows loop name", () => {
+test("Ralph widget renders rounded panel title summary and progress", () => {
   const state = parseLoopStateJson(JSON.stringify({
     name: "widget-header-demo",
     control: "active",
@@ -398,18 +398,27 @@ test("Ralph widget header only shows loop name", () => {
     updatedAt: "2026-05-27T00:00:00.000Z",
     todos: [
       { id: 1, title: "Done work", status: "complete" },
-      { id: 2, title: "Next work", status: "queued" },
-      { id: 3, title: "Later work", status: "deferred" },
+      { id: 2, title: "Problem", status: "failed" },
+      { id: 3, title: "Next work", status: "queued" },
     ],
-    iterations: [],
+    iterations: [{
+      number: 1,
+      status: "accepted",
+      todoId: 1,
+      beforeRef: "before",
+      startedAt: "2026-05-27T00:00:00.000Z",
+      completedAt: "2026-05-27T00:01:00.000Z",
+      usage: { input: 1000, output: 2000, cacheRead: 0, cacheWrite: 0, totalTokens: 3000, cost: 0.1234 },
+    }],
   }));
 
   const output = renderRalphWidget(state, undefined, plainTheme as never, 120).join("\n");
-  assert.match(output, /Ralph Loop · widget-header-demo/);
-  assert.doesNotMatch(output, /ready|completed|Iteration|Todos 1\/3|\/5/);
+  assert.match(output, /^╭─ Subagent Loop · widget-header-demo .*✓ 1\/3 · ✗1 · \$0\.1234 · 1m 0s ╮/m);
+  assert.match(output, /╰─ [━─]+ ╯/);
+  assert.doesNotMatch(output, /Ralph Loop · widget-header-demo|✗0|↓\d+ [○Ⅱ◌]|↑\d+ [✓✗]/);
 });
 
-test("Ralph widget expanded mode renders all todos without crop dividers", () => {
+test("Ralph widget expanded mode renders all todos inside side borders", () => {
   const state = parseLoopStateJson(JSON.stringify({
     name: "widget-expanded-demo",
     control: "active",
@@ -423,19 +432,19 @@ test("Ralph widget expanded mode renders all todos without crop dividers", () =>
       { id: 3, title: "Current work", status: "running" },
       { id: 4, title: "Next work", status: "queued" },
       { id: 5, title: "Later work", status: "deferred" },
-      { id: 6, title: "Future work", status: "deferred" },
-      { id: 7, title: "Hidden future", status: "deferred" },
-      { id: 8, title: "Also hidden", status: "deferred" },
     ],
     iterations: [],
   }));
 
-  const output = renderRalphWidget(state, undefined, plainTheme as never, 80, "expanded").join("\n");
-  assert.match(output, /#1 First done[\s\S]*#8 Also hidden/);
-  assert.doesNotMatch(output, /↑ \d+ more|↓ \d+ more/);
+  const output = renderRalphWidget(state, undefined, plainTheme as never, 100, "expanded").join("\n");
+  assert.match(output, /╭─ Subagent Loop/);
+  assert.match(output, /│  ✓   #1 First done/);
+  assert.match(output, /#1 First done[\s\S]*#5 Later work/);
+  assert.match(output, /│\s*│\n│  ✓/);
+  assert.doesNotMatch(output, /more|↓\d+ [○Ⅱ◌]|↑\d+ [✓✗]/);
 });
 
-test("Ralph widget compact mode shows focused todo and header badges", () => {
+test("Ralph widget compact mode focuses actionable todo without header badges", () => {
   const state = parseLoopStateJson(JSON.stringify({
     name: "widget-compact-demo",
     control: "active",
@@ -446,24 +455,39 @@ test("Ralph widget compact mode shows focused todo and header badges", () => {
     todos: [
       { id: 1, title: "First done", status: "complete" },
       { id: 2, title: "Problem", status: "failed" },
-      { id: 3, title: "Current work", status: "running" },
-      { id: 4, title: "Next work", status: "queued" },
-      { id: 5, title: "Later work", status: "deferred" },
-      { id: 6, title: "Future work", status: "deferred" },
+      { id: 3, title: "Current work", status: "queued" },
+      { id: 4, title: "Later work", status: "deferred" },
     ],
     iterations: [],
   }));
 
   const output = renderRalphWidget(state, undefined, plainTheme as never, 120, "compact").join("\n");
-  assert.match(output, /↑1 ✓/);
-  assert.match(output, /↑1 ✗/);
-  assert.match(output, /↓1 ○/);
-  assert.match(output, /↓2 ◌/);
-  assert.match(output, /#3 Current work/);
-  assert.doesNotMatch(output, /#1 First done|#2 Problem|#4 Next work|#5 Later work|#6 Future work|more/);
+  assert.match(output, /#2 Problem/);
+  assert.doesNotMatch(output, /#1 First done|#3 Current work|#4 Later work|↑1 ✓|↓1 ○/);
 });
 
-test("Ralph widget dividers use border blue instead of accent", () => {
+test("Ralph widget compact mode selects queued work before latest complete", () => {
+  const state = parseLoopStateJson(JSON.stringify({
+    name: "widget-queued-demo",
+    control: "active",
+    branch: "orchestrator/widget-queued-demo",
+    currentIteration: 2,
+    createdAt: "2026-05-27T00:00:00.000Z",
+    updatedAt: "2026-05-27T00:00:00.000Z",
+    todos: [
+      { id: 1, title: "First done", status: "complete" },
+      { id: 2, title: "Latest done", status: "complete" },
+      { id: 3, title: "Next work", status: "queued" },
+    ],
+    iterations: [],
+  }));
+
+  const output = renderRalphWidget(state, undefined, plainTheme as never, 120, "compact").join("\n");
+  assert.match(output, /○   #3 Next work/);
+  assert.doesNotMatch(output, /#1 First done|#2 Latest done/);
+});
+
+test("Ralph widget uses border color for panel chrome and highlights running rows", () => {
   const state = parseLoopStateJson(JSON.stringify({
     name: "widget-border-demo",
     control: "active",
@@ -475,12 +499,13 @@ test("Ralph widget dividers use border blue instead of accent", () => {
     iterations: [],
   }));
 
-  const output = renderRalphWidget(state, undefined, taggedTheme as never, 40, "expanded").join("\n");
-  assert.match(output, /<border>─+/);
-  assert.doesNotMatch(output, /<accent>─+/);
+  const output = renderRalphWidget(state, undefined, taggedTheme as never, 200, "expanded").join("\n");
+  assert.match(output, /<border>╭─/);
+  assert.match(output, /<bg:toolPendingBg>  <accent>[^<]+<\/accent>   <accent>#1 Current work/);
+  assert.doesNotMatch(output, /<accent>╭|›/);
 });
 
-test("Ralph widget renders compact usage and omits successful verification text", () => {
+test("Ralph widget renders detail row in model tokens context cost time diff files order", () => {
   const state = parseLoopStateJson(JSON.stringify({
     name: "widget-demo",
     control: "active",
@@ -498,16 +523,17 @@ test("Ralph widget renders compact usage and omits successful verification text"
       completedAt: "2026-05-27T00:01:00.000Z",
       verification: { status: "passed", commands: [{ command: "npm test", exitCode: 0, summary: "ok" }] },
       diff: { filesChanged: 1, insertions: 1, deletions: 1 },
+      model: "anthropic/sonnet",
       usage: { input: 50000, output: 30000, cacheRead: 6999, cacheWrite: 0, totalTokens: 86999, cost: 0.165567, contextTokens: 66100, contextWindow: 272000 },
     }],
   }));
 
-  const output = renderRalphWidget(state, undefined, plainTheme as never, 120).join("\n");
-  assert.match(output, /1m 0s · ↑50k ↓30k R7\.0k · 24\.3%\/272k · \$0\.1656 · \+1 \/ -1 · 1 files/);
-  assert.doesNotMatch(output, /passed|verification ok/);
+  const output = renderRalphWidget(state, undefined, plainTheme as never, 140).join("\n");
+  assert.match(output, /sonnet · ↑50k ↓30k R7\.0k · 24\.3%\/272k · \$0\.1656 · 1m 0s · \+1 \/ -1 · 1 File/);
+  assert.doesNotMatch(output, /anthropic\/sonnet|1 files|passed|verification ok|Used /);
 });
 
-test("Ralph widget renders running worker usage like completed rows", () => {
+test("Ralph widget renders running worker usage without tool phrases", () => {
   const state = parseLoopStateJson(JSON.stringify({
     name: "widget-running-demo",
     control: "active",
@@ -538,62 +564,41 @@ test("Ralph widget renders running worker usage like completed rows", () => {
     latestUsage: { input: 60000, output: 6000, cacheRead: 0, cacheWrite: 0, totalTokens: 66000 },
   }, plainTheme as never, 160).join("\n");
 
-  assert.match(output, /1m 20s · ↑261k ↓21k R4\.2m · 24\.3%\/272k · \$0\.1590 · openai-codex\/gpt-5\.5 · Used Read, Edit/);
-  assert.doesNotMatch(output, /tools read, edit/);
-  assert.doesNotMatch(output, /  running ·/);
+  assert.match(output, /gpt-5\.5 · ↑261k ↓21k R4\.2m · 24\.3%\/272k · \$0\.1590 · 1m 20s/);
+  assert.doesNotMatch(output, /openai-codex\/gpt-5\.5|Used Read|tools read, edit|›/);
 });
 
-test("Ralph widget summarizes long running tool lists", () => {
+test("Ralph widget renders queued and deferred placeholder telemetry", () => {
   const state = parseLoopStateJson(JSON.stringify({
-    name: "widget-tools-demo",
-    control: "active",
-    branch: "orchestrator/widget-tools-demo",
+    name: "widget-placeholder-demo",
+    control: "paused",
+    branch: "orchestrator/widget-placeholder-demo",
     currentIteration: 1,
     createdAt: "2026-05-27T00:00:00.000Z",
     updatedAt: "2026-05-27T00:00:00.000Z",
-    todos: [{ id: 1, title: "Do work", status: "running" }],
+    todos: [
+      { id: 1, title: "Queued work", status: "queued" },
+      { id: 2, title: "Later work", status: "deferred" },
+    ],
     iterations: [],
   }));
 
   const output = renderRalphWidget(state, {
-    phase: "running",
-    elapsedMs: 1_000,
-    events: 4,
-    toolCalls: 5,
-    toolNames: ["read", "edit", "write", "bash"],
-    assistantMessages: 1,
-    usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 },
-  }, plainTheme as never, 160).join("\n");
-
-  assert.match(output, /Used Read, Edit \+3 more/);
-});
-
-test("Ralph widget falls back when running tool names are missing", () => {
-  const state = parseLoopStateJson(JSON.stringify({
-    name: "widget-tools-fallback-demo",
-    control: "active",
-    branch: "orchestrator/widget-tools-fallback-demo",
-    currentIteration: 1,
-    createdAt: "2026-05-27T00:00:00.000Z",
-    updatedAt: "2026-05-27T00:00:00.000Z",
-    todos: [{ id: 1, title: "Do work", status: "running" }],
-    iterations: [],
-  }));
-
-  const output = renderRalphWidget(state, {
-    phase: "running",
-    elapsedMs: 1_000,
-    events: 3,
-    toolCalls: 3,
+    phase: "starting",
+    configuredModel: "anthropic/sonnet",
+    elapsedMs: 0,
+    events: 0,
+    toolCalls: 0,
     toolNames: [],
-    assistantMessages: 1,
-    usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 },
-  }, plainTheme as never, 160).join("\n");
+    assistantMessages: 0,
+    usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, contextWindow: 272000 },
+  }, plainTheme as never, 140, "expanded").join("\n");
 
-  assert.match(output, /Used 3 tools/);
+  assert.match(output, /○   #1 Queued work[\s\S]*sonnet · ↑0 ↓0 · 0%\/272k · \$0\.0000 · 0s/);
+  assert.match(output, /Ⅱ   #2 Later work[\s\S]*sonnet · ↑0 ↓0 · 0%\/272k · \$0\.0000 · 0s/);
 });
 
-test("Ralph widget footers describe compact and expanded controls", () => {
+test("Ralph widget footers use the same compact and expanded controls", () => {
   const state = parseLoopStateJson(JSON.stringify({
     name: "widget-footer-demo",
     control: "active",
@@ -607,10 +612,11 @@ test("Ralph widget footers describe compact and expanded controls", () => {
 
   const compact = renderRalphWidget(state, undefined, plainTheme as never, 160, "compact").join("\n");
   const expanded = renderRalphWidget(state, undefined, plainTheme as never, 160, "expanded").join("\n");
+  const footer = "Ctrl+Opt+R Expand/Compact · Chat to resume, pause, edit, or kill the loop.";
 
-  assert.match(compact, /Ctrl\+Opt\+R Expand/);
-  assert.match(expanded, /Ctrl\+Opt\+R Compact/);
-  assert.doesNotMatch(`${compact}\n${expanded}`, /Ctrl\+Opt\+R (hide|show|hides|shows)/i);
+  assert.match(compact, new RegExp(escapeRegExp(footer)));
+  assert.match(expanded, new RegExp(escapeRegExp(footer)));
+  assert.doesNotMatch(`${compact}\n${expanded}`, /\/ralph-widget hide|Ctrl\+Opt\+R (Expand$|Compact$)/m);
 });
 
 test("Ralph widget renders verification problem markers", () => {
@@ -630,13 +636,13 @@ test("Ralph widget renders verification problem markers", () => {
       startedAt: "2026-05-27T00:00:00.000Z",
       completedAt: "2026-05-27T00:01:00.000Z",
       verification: { status: "failed", commands: [{ command: "npm test", exitCode: 1, summary: "failed" }] },
-      diff: { filesChanged: 1, insertions: 1, deletions: 0 },
+      diff: { filesChanged: 2, insertions: 1, deletions: 0 },
     }],
   }));
 
   const output = renderRalphWidget(state, undefined, plainTheme as never, 120).join("\n");
-  assert.match(output, /1m 0s · \+1 \/ -0 · 1 files/);
-  assert.doesNotMatch(output, /failed|verification/);
+  assert.match(output, /1m 0s · \+1 \/ -0 · 2 Files/);
+  assert.doesNotMatch(output, /failed|verification|2 files/);
 });
 
 test("parseLoopStateJson validates persisted state", () => {
@@ -810,8 +816,15 @@ console.log(JSON.stringify({ type: "message_end", message: { role: "assistant", 
   await fs.access(path.join(cwd, ".ralph", "orchestrator", "loops", state.name, "iterations", "001", "worker-output.raw.jsonl"));
 });
 
+function escapeRegExp(input: string): string {
+  return input.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 const plainTheme = {
   fg(_color: string, text: string) {
+    return text;
+  },
+  bg(_color: string, text: string) {
     return text;
   },
   bold(text: string) {
@@ -822,6 +835,9 @@ const plainTheme = {
 const taggedTheme = {
   fg(color: string, text: string) {
     return `<${color}>${text}</${color}>`;
+  },
+  bg(color: string, text: string) {
+    return `<bg:${color}>${text}</bg:${color}>`;
   },
   bold(text: string) {
     return text;

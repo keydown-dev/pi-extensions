@@ -521,73 +521,135 @@ const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", 
 const PI_WORKING_SPINNER_INTERVAL_MS = 80;
 
 export function renderRalphWidget(state: LoopState, worker: WorkerProgress | undefined, theme: RalphTheme, width: number, mode: Exclude<RalphWidgetMode, "hidden"> = "expanded"): string[] {
-  const rule = widgetRule(theme, width);
-  const header = mode === "compact" ? renderCompactHeader(state, theme) : theme.fg("accent", theme.bold(`Ralph Loop · ${state.name}`));
-  const lines: string[] = [rule, header, ""];
-
+  const safeWidth = Math.max(0, width);
   const todos = mode === "compact" ? selectedCompactTodo(state.todos) : state.todos;
-  renderTodoRows(lines, state, todos, worker, theme);
+  const lines: string[] = [renderPanelTopBorder(state, worker, theme, safeWidth), renderPanelLine("", theme, safeWidth)];
 
-  lines.push(rule);
-  lines.push(theme.fg("dim", mode === "compact" ? "Ctrl+Opt+R Expand · /ralph-widget hide to dismiss" : "Ctrl+Opt+R Compact · Chat to pause, resume, steer, or kill the loop."));
-  return lines.map((line) => truncateAnsiToWidth(line, width));
+  for (const todo of todos) {
+    lines.push(...renderTodoRow(todo, state, worker, theme, safeWidth));
+    lines.push(renderPanelLine("", theme, safeWidth));
+  }
+
+  lines.push(renderPanelBottomProgressBorder(state, theme, safeWidth));
+  lines.push(theme.fg("dim", "Ctrl+Opt+R Expand/Compact · Chat to resume, pause, edit, or kill the loop."));
+  return lines.map((line) => truncateAnsiToWidth(line, safeWidth));
 }
 
 type WidgetTodo = LoopState["todos"][number];
 
-function renderTodoRows(lines: string[], state: LoopState, todos: WidgetTodo[], worker: WorkerProgress | undefined, theme: RalphTheme): void {
-  for (const todo of todos) {
-    const iteration = latestIterationForTodo(state, todo.id);
-    const isRunning = todo.status === "running";
-    const isSelected = isRunning || todos.length === 1;
-    const prefix = isSelected ? theme.fg("accent", "› ") : "  ";
-    const icon = todoGlyph(todo.status);
-    const iconColor = todo.status === "complete" ? "success" : todo.status === "failed" || todo.status === "interrupted" ? "error" : todo.status === "running" ? "accent" : "dim";
-    const titleColor = todo.status === "running" ? "accent" : "text";
-    lines.push(`${prefix}${theme.fg(iconColor, icon)} ${theme.fg(titleColor, `#${todo.id} ${todo.title}`)}`);
-    lines.push(`  ${renderTodoDetail(todo.status, iteration, isRunning ? worker : undefined, theme)}`);
-    lines.push("");
-  }
+const PANEL_MIN_WIDTH = 8;
+const TODO_TITLE_PREFIX = "  ";
+const TODO_DETAIL_PREFIX = "      ";
+
+function renderTodoRow(todo: WidgetTodo, state: LoopState, worker: WorkerProgress | undefined, theme: RalphTheme, width: number): string[] {
+  const iteration = latestIterationForTodo(state, todo.id);
+  const isRunning = todo.status === "running";
+  const icon = todoGlyph(todo.status, isRunning ? worker?.elapsedMs : undefined);
+  const iconColor = todo.status === "complete" ? "success" : todo.status === "failed" || todo.status === "interrupted" ? "error" : todo.status === "running" ? "accent" : "dim";
+  const rowColor = todo.status === "deferred" ? "dim" : todo.status === "running" ? "accent" : "text";
+  const title = `${TODO_TITLE_PREFIX}${theme.fg(todo.status === "deferred" ? "dim" : iconColor, icon)}   ${theme.fg(rowColor, `#${todo.id} ${todo.title}`)}`;
+  const detail = `${TODO_DETAIL_PREFIX}${renderTodoDetail(todo.status, iteration, isRunning ? worker : undefined, worker, theme)}`;
+  return [renderPanelLine(title, theme, width, { highlight: isRunning }), renderPanelLine(detail, theme, width, { highlight: isRunning })];
 }
 
 function selectedCompactTodo(todos: WidgetTodo[]): WidgetTodo[] {
+  const finalTodo = todos[todos.length - 1];
   const selected = todos.find((todo) => todo.status === "running")
     ?? todos.find((todo) => todo.status === "failed" || todo.status === "interrupted")
-    ?? findLast(todos, (todo) => todo.status === "complete")
     ?? todos.find((todo) => todo.status === "queued" || todo.status === "deferred")
+    ?? (finalTodo?.status === "complete" ? finalTodo : undefined)
     ?? todos[0];
   return selected ? [selected] : [];
 }
 
-function renderCompactHeader(state: LoopState, theme: RalphTheme): string {
-  const selected = selectedCompactTodo(state.todos)[0];
-  const badges = selected ? compactBadges(state.todos, selected, theme) : [];
-  const suffix = badges.length ? `    ${badges.join(" ")}` : "";
-  return theme.fg("accent", theme.bold(`Ralph Loop · ${state.name}`)) + suffix;
-}
+function renderPanelTopBorder(state: LoopState, worker: WorkerProgress | undefined, theme: RalphTheme, width: number): string {
+  if (width < PANEL_MIN_WIDTH) return theme.fg("border", truncatePlain("─".repeat(Math.max(0, width)), width));
+  const innerWidth = width - 2;
+  const metrics = loopSummaryMetrics(state, worker);
+  const titlePrefix = "─ ";
+  const titleSuffix = " ";
+  const summaryLeftPadding = " ";
+  const rightPadding = " ";
+  const summaryCandidates = [
+    `✓ ${metrics.complete}/${metrics.total}`,
+    ...(metrics.errors > 0 ? [`✗${metrics.errors}`] : []),
+    ...(metrics.cost !== undefined ? [`$${metrics.cost.toFixed(4)}`] : []),
+    ...(metrics.elapsedMs !== undefined ? [formatElapsed(metrics.elapsedMs)] : []),
+  ];
 
-function compactBadges(todos: WidgetTodo[], selected: WidgetTodo, theme: RalphTheme): string[] {
-  const selectedIndex = todos.indexOf(selected);
-  const before = todos.slice(0, selectedIndex);
-  const after = todos.slice(selectedIndex + 1);
-  const counts = [
-    { count: before.filter((todo) => todo.status === "complete").length, text: "↑", glyph: "✓", color: "success" },
-    { count: before.filter((todo) => todo.status === "failed" || todo.status === "interrupted").length, text: "↑", glyph: "✗", color: "error" },
-    { count: after.filter((todo) => todo.status === "queued").length, text: "↓", glyph: "○", color: "accent" },
-    { count: after.filter((todo) => todo.status === "deferred").length, text: "↓", glyph: "◌", color: "dim" },
-  ] as const;
-  return counts.filter((badge) => badge.count > 0).map((badge) => theme.fg(badge.color, `${badge.text}${badge.count} ${badge.glyph}`));
-}
-
-function findLast<T>(items: T[], predicate: (item: T) => boolean): T | undefined {
-  for (let index = items.length - 1; index >= 0; index--) {
-    if (predicate(items[index]!)) return items[index];
+  for (let keep = summaryCandidates.length; keep >= 1; keep--) {
+    const summary = summaryCandidates.slice(0, keep).join(" · ");
+    const fixedWidth = visibleWidth(titlePrefix) + visibleWidth(titleSuffix) + visibleWidth(summaryLeftPadding) + visibleWidth(summary) + visibleWidth(rightPadding);
+    const titleWidth = Math.max(0, innerWidth - fixedWidth - 1);
+    const title = truncatePlain(`Subagent Loop · ${state.name}`, titleWidth);
+    const gapWidth = innerWidth - visibleWidth(titlePrefix) - visibleWidth(title) - visibleWidth(titleSuffix) - visibleWidth(summaryLeftPadding) - visibleWidth(summary) - visibleWidth(rightPadding);
+    if (gapWidth >= 1) return theme.fg("border", "╭" + titlePrefix) + theme.fg("accent", theme.bold(title)) + theme.fg("border", titleSuffix + "─".repeat(gapWidth) + summaryLeftPadding) + summary + theme.fg("border", rightPadding + "╮");
   }
-  return undefined;
+
+  const title = truncatePlain(`Subagent Loop · ${state.name}`, Math.max(0, innerWidth - 4));
+  const body = padPlain(`─ ${title} `, innerWidth, "─");
+  return theme.fg("border", "╭") + theme.fg("accent", theme.bold(title ? body : "─".repeat(innerWidth))) + theme.fg("border", "╮");
 }
 
-function widgetRule(theme: RalphTheme, width: number): string {
-  return theme.fg("border", "─".repeat(Math.max(0, width)));
+function renderPanelLine(content: string, theme: RalphTheme, width: number, options: { highlight?: boolean } = {}): string {
+  if (width < PANEL_MIN_WIDTH) return truncateAnsiToWidth(content, width);
+  const innerWidth = width - 2;
+  const inner = padAnsiToWidth(truncateAnsiToWidth(content, innerWidth), innerWidth);
+  const highlighted = options.highlight ? themeBg(theme, "toolPendingBg", inner) : inner;
+  return theme.fg("border", "│") + highlighted + theme.fg("border", "│");
+}
+
+function renderPanelBottomProgressBorder(state: LoopState, theme: RalphTheme, width: number): string {
+  if (width < PANEL_MIN_WIDTH) return theme.fg("border", truncatePlain("─".repeat(Math.max(0, width)), width));
+  const innerWidth = width - 2;
+  const metrics = loopSummaryMetrics(state, undefined);
+  const barWidth = Math.max(0, innerWidth - 3);
+  const filledWidth = metrics.total > 0 ? Math.round((metrics.complete / metrics.total) * barWidth) : 0;
+  const filled = theme.fg("success", "━".repeat(filledWidth));
+  const remaining = theme.fg("border", "─".repeat(Math.max(0, barWidth - filledWidth)));
+  return theme.fg("border", "╰─ ") + filled + remaining + theme.fg("border", " ╯");
+}
+
+function loopSummaryMetrics(state: LoopState, worker: WorkerProgress | undefined): { complete: number; total: number; errors: number; cost?: number; elapsedMs?: number } {
+  const complete = state.todos.filter((todo) => todo.status === "complete").length;
+  const errors = state.todos.filter((todo) => todo.status === "failed" || todo.status === "interrupted").length;
+  let cost = 0;
+  let hasCost = false;
+  let elapsedMs = 0;
+  let hasElapsed = false;
+  for (const iteration of state.iterations) {
+    if (iteration.usage?.cost !== undefined) {
+      cost += iteration.usage.cost;
+      hasCost = true;
+    }
+    const elapsed = iterationElapsedMs(iteration);
+    if (elapsed !== undefined) {
+      elapsedMs += elapsed;
+      hasElapsed = true;
+    }
+  }
+  if (worker?.usage.cost !== undefined) {
+    cost += worker.usage.cost;
+    hasCost = true;
+  }
+  if (worker?.elapsedMs !== undefined && worker.phase !== "exited") {
+    elapsedMs += worker.elapsedMs;
+    hasElapsed = true;
+  }
+  return { complete, total: state.todos.length, errors, ...(hasCost ? { cost } : {}), ...(hasElapsed ? { elapsedMs } : {}) };
+}
+
+function iterationElapsedMs(iteration: LoopState["iterations"][number] | undefined): number | undefined {
+  if (!iteration?.completedAt) return undefined;
+  const started = Date.parse(iteration.startedAt);
+  const completed = Date.parse(iteration.completedAt);
+  if (!Number.isFinite(started) || !Number.isFinite(completed)) return undefined;
+  return Math.max(0, completed - started);
+}
+
+function themeBg(theme: RalphTheme, color: string, text: string): string {
+  const maybeTheme = theme as RalphTheme & { bg?: (color: string, text: string) => string };
+  return maybeTheme.bg ? maybeTheme.bg(color, text) : text;
 }
 
 function widgetStateSignature(state: LoopState): string {
@@ -622,6 +684,39 @@ function truncateAnsiToWidth(input: string, width: number): string {
     index += char.length;
   }
   return output;
+}
+
+function visibleWidth(input: string): number {
+  let visible = 0;
+  for (let index = 0; index < input.length;) {
+    if (input[index] === "\x1b") {
+      const match = input.slice(index).match(/^\x1b\[[0-?]*[ -/]*[@-~]/);
+      if (match) {
+        index += match[0].length;
+        continue;
+      }
+    }
+    const char = Array.from(input.slice(index))[0] ?? "";
+    if (!char) break;
+    visible += 1;
+    index += char.length;
+  }
+  return visible;
+}
+
+function padAnsiToWidth(input: string, width: number, fill = " "): string {
+  const visible = visibleWidth(input);
+  return visible >= width ? input : input + fill.repeat(width - visible);
+}
+
+function truncatePlain(input: string, width: number): string {
+  if (width <= 0) return "";
+  return Array.from(input).slice(0, width).join("");
+}
+
+function padPlain(input: string, width: number, fill = " "): string {
+  const truncated = truncatePlain(input, width);
+  return truncated + fill.repeat(Math.max(0, width - visibleWidth(truncated)));
 }
 
 function latestIterationForTodo(state: LoopState, todoId: LoopState["todos"][number]["id"]): LoopState["iterations"][number] | undefined {
@@ -662,35 +757,46 @@ function displayToolName(toolName: string): string {
     .join(" ");
 }
 
-function renderTodoDetail(status: LoopState["todos"][number]["status"], iteration: LoopState["iterations"][number] | undefined, worker: WorkerProgress | undefined, theme: RalphTheme): string {
+function renderTodoDetail(status: LoopState["todos"][number]["status"], iteration: LoopState["iterations"][number] | undefined, worker: WorkerProgress | undefined, fallbackWorker: WorkerProgress | undefined, theme: RalphTheme): string {
   if (status === "running" && worker) {
-    const model = worker.model ? `${worker.provider ? `${worker.provider}/` : ""}${worker.model}` : worker.configuredModel;
-    const tools = renderToolPhrase(worker.toolNames, worker.toolCalls);
-    const segments = [theme.fg("muted", formatElapsed(worker.elapsedMs)), ...renderRunningUsageSegments(worker, theme)];
+    const segments: string[] = [];
+    const model = displayModelName(worker.model ?? worker.configuredModel);
     if (model) segments.push(theme.fg("muted", model));
-    segments.push(theme.fg("muted", tools));
+    segments.push(...renderRunningUsageSegments(worker, theme));
+    segments.push(theme.fg("muted", formatElapsed(worker.elapsedMs)));
     return segments.join(theme.fg("muted", " · "));
   }
 
   if (status === "complete" || status === "failed" || status === "interrupted") {
     const segments: string[] = [];
+    const iterationWithModel = iteration as (LoopState["iterations"][number] & { model?: string; provider?: string }) | undefined;
+    const model = displayModelName(iterationWithModel?.model);
+    if (model) segments.push(theme.fg("muted", model));
+    segments.push(...renderUsageSegments(iteration?.usage, theme));
     const elapsed = renderIterationElapsed(iteration);
     if (elapsed) segments.push(theme.fg("muted", elapsed));
-    segments.push(...renderUsageSegments(iteration?.usage, theme));
     if (iteration?.diff) segments.push(...renderDiffSummarySegments(iteration.diff, theme));
     return segments.join(theme.fg("muted", " · "));
   }
 
-  if (status === "deferred") return theme.fg("dim", "deferred");
-  return theme.fg("dim", "queued");
+  const placeholder = renderPlaceholderDetail(fallbackWorker, theme);
+  return status === "deferred" ? theme.fg("dim", placeholder) : placeholder;
+}
+
+function renderPlaceholderDetail(worker: WorkerProgress | undefined, theme: RalphTheme): string {
+  const segments: string[] = [];
+  const model = displayModelName(worker?.model ?? worker?.configuredModel);
+  if (model) segments.push(theme.fg("muted", model));
+  segments.push(theme.fg("muted", renderTokenBreakdown({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 })));
+  const contextWindow = worker?.latestUsage?.contextWindow ?? worker?.usage.contextWindow;
+  if (contextWindow) segments.push(theme.fg("muted", `0%/${formatTokenCount(contextWindow)}`));
+  segments.push(theme.fg("muted", "$0.0000"), theme.fg("muted", "0s"));
+  return segments.join(theme.fg("muted", " · "));
 }
 
 function renderIterationElapsed(iteration: LoopState["iterations"][number] | undefined): string {
-  if (!iteration?.completedAt) return "";
-  const started = Date.parse(iteration.startedAt);
-  const completed = Date.parse(iteration.completedAt);
-  if (!Number.isFinite(started) || !Number.isFinite(completed)) return "";
-  return formatElapsed(completed - started);
+  const elapsed = iterationElapsedMs(iteration);
+  return elapsed === undefined ? "" : formatElapsed(elapsed);
 }
 
 function renderUsageSegments(usage: WorkerUsage | undefined, theme: RalphTheme): string[] {
@@ -709,12 +815,21 @@ function renderUsageSegmentsForDisplay(usage: WorkerUsage, theme: RalphTheme): s
   const segments = [theme.fg("muted", renderTokenBreakdown(usage))];
   const context = renderContextWindowUsage(usage);
   if (context) segments.push(theme.fg("muted", context));
-  if (usage.cost && usage.cost > 0) segments.push(theme.fg("muted", `$${usage.cost.toFixed(4)}`));
+  if (usage.cost !== undefined) segments.push(theme.fg("muted", `$${usage.cost.toFixed(4)}`));
   return segments;
 }
 
 function renderDiffSummarySegments(diff: NonNullable<LoopState["iterations"][number]["diff"]>, theme: RalphTheme): string[] {
-  return [theme.fg("muted", `+${diff.insertions} / -${diff.deletions}`), theme.fg("muted", `${diff.filesChanged} files`)];
+  const fileLabel = diff.filesChanged === 1 ? "File" : "Files";
+  return [theme.fg("muted", `+${diff.insertions} / -${diff.deletions}`), theme.fg("muted", `${diff.filesChanged} ${fileLabel}`)];
+}
+
+function displayModelName(model: string | undefined): string {
+  if (!model) return "";
+  const trimmed = model.trim();
+  if (!trimmed) return "";
+  const slashParts = trimmed.split("/");
+  return slashParts[slashParts.length - 1] ?? trimmed;
 }
 
 function renderTokenBreakdown(usage: WorkerUsage): string {
@@ -745,7 +860,7 @@ function spinnerFrame(elapsedMs = Date.now()): string {
 }
 
 function todoGlyph(status: LoopState["todos"][number]["status"], elapsedMs?: number): string {
-  return status === "running" ? spinnerFrame(elapsedMs) : status === "queued" ? "○" : status === "complete" ? "✓" : status === "deferred" ? "◌" : status === "interrupted" ? "!" : "✗";
+  return status === "running" ? spinnerFrame(elapsedMs) : status === "queued" ? "○" : status === "complete" ? "✓" : status === "deferred" ? "Ⅱ" : status === "interrupted" ? "!" : "✗";
 }
 
 function formatElapsed(ms: number): string {

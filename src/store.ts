@@ -214,6 +214,8 @@ const IterationStateSchema = Type.Object({
   beforeRef: Type.String(),
   afterRef: Type.Optional(Type.String()),
   workerBranch: Type.Optional(Type.String()),
+  model: Type.Optional(Type.String()),
+  provider: Type.Optional(Type.String()),
   startedAt: Type.String(),
   completedAt: Type.Optional(Type.String()),
   verification: Type.Optional(VerificationRecordSchema),

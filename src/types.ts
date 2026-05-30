@@ -53,6 +53,8 @@ export interface IterationState {
   beforeRef: string;
   afterRef?: string;
   workerBranch?: string;
+  model?: string;
+  provider?: string;
   startedAt: string;
   completedAt?: string;
   verification?: VerificationRecord;

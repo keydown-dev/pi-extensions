@@ -409,6 +409,59 @@ test("Ralph widget header only shows loop name", () => {
   assert.doesNotMatch(output, /ready|completed|Iteration|Todos 1\/3|\/5/);
 });
 
+test("Ralph widget paginates long todo lists around current work", () => {
+  const state = parseLoopStateJson(JSON.stringify({
+    name: "widget-pagination-demo",
+    control: "active",
+    branch: "orchestrator/widget-pagination-demo",
+    currentIteration: 3,
+    createdAt: "2026-05-27T00:00:00.000Z",
+    updatedAt: "2026-05-27T00:00:00.000Z",
+    todos: [
+      { id: 1, title: "First done", status: "complete" },
+      { id: 2, title: "Latest done", status: "complete" },
+      { id: 3, title: "Current work", status: "running" },
+      { id: 4, title: "Next work", status: "queued" },
+      { id: 5, title: "Later work", status: "deferred" },
+      { id: 6, title: "Future work", status: "deferred" },
+      { id: 7, title: "Hidden future", status: "deferred" },
+      { id: 8, title: "Also hidden", status: "deferred" },
+    ],
+    iterations: [],
+  }));
+
+  const output = renderRalphWidget(state, undefined, plainTheme as never, 80).join("\n");
+  assert.match(output, /↑ 1 more/);
+  assert.match(output, /#2 Latest done[\s\S]*#3 Current work/);
+  assert.match(output, /↓ 2 more/);
+  assert.doesNotMatch(output, /#1 First done|#7 Hidden future|#8 Also hidden/);
+});
+
+test("Ralph widget dividers use border blue instead of accent", () => {
+  const state = parseLoopStateJson(JSON.stringify({
+    name: "widget-border-demo",
+    control: "active",
+    branch: "orchestrator/widget-border-demo",
+    currentIteration: 3,
+    createdAt: "2026-05-27T00:00:00.000Z",
+    updatedAt: "2026-05-27T00:00:00.000Z",
+    todos: [
+      { id: 1, title: "First done", status: "complete" },
+      { id: 2, title: "Latest done", status: "complete" },
+      { id: 3, title: "Current work", status: "running" },
+      { id: 4, title: "Next work", status: "queued" },
+      { id: 5, title: "Later work", status: "deferred" },
+      { id: 6, title: "Future work", status: "deferred" },
+    ],
+    iterations: [],
+  }));
+
+  const output = renderRalphWidget(state, undefined, taggedTheme as never, 40).join("\n");
+  assert.match(output, /<border>─+/);
+  assert.match(output, /<border>.*↑ 1 more/);
+  assert.doesNotMatch(output, /<accent>─+/);
+});
+
 test("Ralph widget renders compact usage and omits successful verification text", () => {
   const state = parseLoopStateJson(JSON.stringify({
     name: "widget-demo",
@@ -671,6 +724,15 @@ console.log(JSON.stringify({ type: "message_end", message: { role: "assistant", 
 const plainTheme = {
   fg(_color: string, text: string) {
     return text;
+  },
+  bold(text: string) {
+    return text;
+  },
+};
+
+const taggedTheme = {
+  fg(color: string, text: string) {
+    return `<${color}>${text}</${color}>`;
   },
   bold(text: string) {
     return text;

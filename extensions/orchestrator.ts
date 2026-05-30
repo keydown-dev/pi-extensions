@@ -484,10 +484,13 @@ const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", 
 const PI_WORKING_SPINNER_INTERVAL_MS = 80;
 
 export function renderRalphWidget(state: LoopState, worker: WorkerProgress | undefined, theme: RalphTheme, width: number): string[] {
-  const rule = theme.fg("accent", "─".repeat(Math.max(0, width)));
+  const rule = widgetRule(theme, width);
   const lines: string[] = [rule, theme.fg("accent", theme.bold(`Ralph Loop · ${state.name}`)), ""];
+  const visibleTodos = paginatedTodos(state.todos);
 
-  for (const todo of state.todos) {
+  if (visibleTodos.hiddenBefore > 0) lines.push(widgetCropIndicator("up", visibleTodos.hiddenBefore, theme, width), "");
+
+  for (const todo of visibleTodos.todos) {
     const iteration = latestIterationForTodo(state, todo.id);
     const isRunning = todo.status === "running";
     const prefix = isRunning ? theme.fg("accent", "› ") : "  ";
@@ -499,9 +502,51 @@ export function renderRalphWidget(state: LoopState, worker: WorkerProgress | und
     lines.push("");
   }
 
+  if (visibleTodos.hiddenAfter > 0) lines.push(widgetCropIndicator("down", visibleTodos.hiddenAfter, theme, width), "");
+
   lines.push(rule);
   lines.push(theme.fg("dim", "Ctrl+Opt+R Show/Hide · Chat to pause, resume, steer, or kill the loop."));
   return lines.map((line) => truncateAnsiToWidth(line, width));
+}
+
+type WidgetTodo = LoopState["todos"][number];
+
+function paginatedTodos(todos: WidgetTodo[]): { todos: WidgetTodo[]; hiddenBefore: number; hiddenAfter: number } {
+  const maxVisible = 5;
+  if (todos.length <= maxVisible) return { todos, hiddenBefore: 0, hiddenAfter: 0 };
+
+  const runningIndex = todos.findIndex((todo) => todo.status === "running");
+  const lastCompletedIndex = findLastIndex(todos, (todo) => todo.status === "complete");
+  let start = lastCompletedIndex >= 0 ? lastCompletedIndex : runningIndex >= 0 ? Math.max(0, runningIndex - 1) : 0;
+
+  if (runningIndex >= 0 && runningIndex !== start + 1) {
+    start = Math.max(0, runningIndex - 1);
+  }
+
+  return {
+    todos: todos.slice(start, start + maxVisible),
+    hiddenBefore: start,
+    hiddenAfter: Math.max(0, todos.length - start - maxVisible),
+  };
+}
+
+function findLastIndex<T>(items: T[], predicate: (item: T) => boolean): number {
+  for (let index = items.length - 1; index >= 0; index--) {
+    if (predicate(items[index]!)) return index;
+  }
+  return -1;
+}
+
+function widgetRule(theme: RalphTheme, width: number): string {
+  return theme.fg("border", "─".repeat(Math.max(0, width)));
+}
+
+function widgetCropIndicator(direction: "up" | "down", hiddenCount: number, theme: RalphTheme, width: number): string {
+  const label = ` ${direction === "up" ? "↑" : "↓"} ${hiddenCount} more `;
+  const remaining = Math.max(0, width - label.length);
+  const left = "─".repeat(Math.floor(remaining / 2));
+  const right = "─".repeat(Math.ceil(remaining / 2));
+  return theme.fg("border", `${left}${label}${right}`);
 }
 
 function truncateAnsiToWidth(input: string, width: number): string {

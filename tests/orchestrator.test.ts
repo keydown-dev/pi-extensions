@@ -538,8 +538,79 @@ test("Ralph widget renders running worker usage like completed rows", () => {
     latestUsage: { input: 60000, output: 6000, cacheRead: 0, cacheWrite: 0, totalTokens: 66000 },
   }, plainTheme as never, 160).join("\n");
 
-  assert.match(output, /1m 20s · ↑261k ↓21k R4\.2m · 24\.3%\/272k · \$0\.1590 · openai-codex\/gpt-5\.5 · tools read, edit/);
+  assert.match(output, /1m 20s · ↑261k ↓21k R4\.2m · 24\.3%\/272k · \$0\.1590 · openai-codex\/gpt-5\.5 · Used Read, Edit/);
+  assert.doesNotMatch(output, /tools read, edit/);
   assert.doesNotMatch(output, /  running ·/);
+});
+
+test("Ralph widget summarizes long running tool lists", () => {
+  const state = parseLoopStateJson(JSON.stringify({
+    name: "widget-tools-demo",
+    control: "active",
+    branch: "orchestrator/widget-tools-demo",
+    currentIteration: 1,
+    createdAt: "2026-05-27T00:00:00.000Z",
+    updatedAt: "2026-05-27T00:00:00.000Z",
+    todos: [{ id: 1, title: "Do work", status: "running" }],
+    iterations: [],
+  }));
+
+  const output = renderRalphWidget(state, {
+    phase: "running",
+    elapsedMs: 1_000,
+    events: 4,
+    toolCalls: 5,
+    toolNames: ["read", "edit", "write", "bash"],
+    assistantMessages: 1,
+    usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 },
+  }, plainTheme as never, 160).join("\n");
+
+  assert.match(output, /Used Read, Edit \+3 more/);
+});
+
+test("Ralph widget falls back when running tool names are missing", () => {
+  const state = parseLoopStateJson(JSON.stringify({
+    name: "widget-tools-fallback-demo",
+    control: "active",
+    branch: "orchestrator/widget-tools-fallback-demo",
+    currentIteration: 1,
+    createdAt: "2026-05-27T00:00:00.000Z",
+    updatedAt: "2026-05-27T00:00:00.000Z",
+    todos: [{ id: 1, title: "Do work", status: "running" }],
+    iterations: [],
+  }));
+
+  const output = renderRalphWidget(state, {
+    phase: "running",
+    elapsedMs: 1_000,
+    events: 3,
+    toolCalls: 3,
+    toolNames: [],
+    assistantMessages: 1,
+    usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 },
+  }, plainTheme as never, 160).join("\n");
+
+  assert.match(output, /Used 3 tools/);
+});
+
+test("Ralph widget footers describe compact and expanded controls", () => {
+  const state = parseLoopStateJson(JSON.stringify({
+    name: "widget-footer-demo",
+    control: "active",
+    branch: "orchestrator/widget-footer-demo",
+    currentIteration: 1,
+    createdAt: "2026-05-27T00:00:00.000Z",
+    updatedAt: "2026-05-27T00:00:00.000Z",
+    todos: [{ id: 1, title: "Do work", status: "queued" }],
+    iterations: [],
+  }));
+
+  const compact = renderRalphWidget(state, undefined, plainTheme as never, 160, "compact").join("\n");
+  const expanded = renderRalphWidget(state, undefined, plainTheme as never, 160, "expanded").join("\n");
+
+  assert.match(compact, /Ctrl\+Opt\+R Expand/);
+  assert.match(expanded, /Ctrl\+Opt\+R Compact/);
+  assert.doesNotMatch(`${compact}\n${expanded}`, /Ctrl\+Opt\+R (hide|show|hides|shows)/i);
 });
 
 test("Ralph widget renders verification problem markers", () => {

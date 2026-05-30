@@ -64,7 +64,7 @@ export default function (pi: ExtensionAPI) {
     ralphWidgetMode = mode;
     lastHiddenWidgetSignature = mode === "hidden" && latestWidgetState ? widgetStateSignature(latestWidgetState) : null;
     updateUI(ctx, latestWidgetState, latestWidgetWorker);
-    ctx.ui.notify(`Ralph widget ${mode}.`, "info");
+    ctx.ui.notify(`Ralph widget ${mode}`, "info");
   }
 
   async function densityToggleWidget(ctx: ExtensionContext): Promise<void> {
@@ -92,7 +92,7 @@ export default function (pi: ExtensionAPI) {
     if (mode === "hide" || mode === "off") return setWidgetMode(ctx, "hidden");
     if (mode === "compact" || mode === "collapse" || mode === "collapsed") return setWidgetMode(ctx, "compact");
     if (mode === "expanded" || mode === "expand" || mode === "full") return setWidgetMode(ctx, "expanded");
-    if (mode && mode !== "toggle") throw new Error("Usage: /ralph-widget [toggle|compact|expanded|show|hide]");
+    if (mode && mode !== "toggle") throw new Error("Usage: /ralph-widget [toggle|compact|expand|show|hide]");
     return densityToggleWidget(ctx);
   }
 
@@ -197,7 +197,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("ralph-list", command("List Ralph orchestrator loops", showList));
   pi.registerCommand("ralph-run", command("Run one or more Ralph worker iterations", runLoop));
   pi.registerCommand("ralph-widget", {
-    description: "Set Ralph widget mode (compact, expanded, or hidden)",
+    description: "Set Ralph widget mode (compact, expand, show, or hide)",
     handler: async (args, ctx) => {
       try {
         await toggleWidget(args, ctx);
@@ -431,7 +431,7 @@ Primary commands:
   /ralph-kill [name]                               Kill the current Ralph worker process and pause
   /ralph-status [name]                             Show current or named loop status
   /ralph-list                                      List all loops
-  /ralph-widget [toggle|compact|expanded|show|hide] Set Ralph widget mode (Ctrl+Opt+R expands/contracts)
+  /ralph-widget [toggle|compact|expand|show|hide] Set Ralph widget mode (Ctrl+Opt+R expands/contracts)
 
 Natural usage:
   Ask: "Can we set up a ralph loop to get through our issues? Max of 5 loops."`;
@@ -632,10 +632,40 @@ function latestIterationForTodo(state: LoopState, todoId: LoopState["todos"][num
   return undefined;
 }
 
+export function renderToolPhrase(toolNames: readonly string[], fallbackCount = 0, maxVisible = 2): string {
+  const normalizedNames = toolNames.map(displayToolName).filter((name) => name.length > 0);
+  if (normalizedNames.length === 0) {
+    if (fallbackCount > 0) return `Used ${fallbackCount} ${fallbackCount === 1 ? "tool" : "tools"}`;
+    return "Used tools";
+  }
+
+  const visibleNames = normalizedNames.slice(0, maxVisible);
+  const hiddenCount = Math.max(normalizedNames.length, fallbackCount) - visibleNames.length;
+  const suffix = hiddenCount > 0 ? ` +${hiddenCount} more` : "";
+  return `Used ${visibleNames.join(", ")}${suffix}`;
+}
+
+function displayToolName(toolName: string): string {
+  const knownTools: Record<string, string> = {
+    bash: "Bash",
+    edit: "Edit",
+    read: "Read",
+    write: "Write",
+  };
+  const trimmed = toolName.trim();
+  const known = knownTools[trimmed.toLowerCase()];
+  if (known) return known;
+  return trimmed
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(" ");
+}
+
 function renderTodoDetail(status: LoopState["todos"][number]["status"], iteration: LoopState["iterations"][number] | undefined, worker: WorkerProgress | undefined, theme: RalphTheme): string {
   if (status === "running" && worker) {
     const model = worker.model ? `${worker.provider ? `${worker.provider}/` : ""}${worker.model}` : worker.configuredModel;
-    const tools = worker.toolNames.length ? `tools ${worker.toolNames.slice(-3).join(", ")}` : `${worker.toolCalls} tools`;
+    const tools = renderToolPhrase(worker.toolNames, worker.toolCalls);
     const segments = [theme.fg("muted", formatElapsed(worker.elapsedMs)), ...renderRunningUsageSegments(worker, theme)];
     if (model) segments.push(theme.fg("muted", model));
     segments.push(theme.fg("muted", tools));

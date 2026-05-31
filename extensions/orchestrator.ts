@@ -65,7 +65,7 @@ export default function (pi: ExtensionAPI) {
     ralphWidgetMode = mode;
     lastHiddenWidgetSignature = mode === "hidden" && latestWidgetState ? widgetStateSignature(latestWidgetState) : null;
     updateUI(ctx, latestWidgetState, latestWidgetWorker);
-    ctx.ui.notify(`Ralph widget ${mode}`, "info");
+    ctx.ui.notify(`Subagent Loop widget ${mode}`, "info");
   }
 
   async function densityToggleWidget(ctx: ExtensionContext): Promise<void> {
@@ -82,7 +82,7 @@ export default function (pi: ExtensionAPI) {
       latestWidgetState = active;
       return true;
     }
-    ctx.ui.notify(`No non-complete Ralph loop detected. Available loops:\n${renderLoopList(states)}`, "info");
+    ctx.ui.notify(`No non-complete Subagent Loop detected. Available loops:\n${renderLoopList(states)}`, "info");
     updateUI(ctx, null);
     return false;
   }
@@ -93,7 +93,7 @@ export default function (pi: ExtensionAPI) {
     if (mode === "hide" || mode === "off") return setWidgetMode(ctx, "hidden");
     if (mode === "compact" || mode === "collapse" || mode === "collapsed") return setWidgetMode(ctx, "compact");
     if (mode === "expanded" || mode === "expand" || mode === "full") return setWidgetMode(ctx, "expanded");
-    if (mode && mode !== "toggle") throw new Error("Usage: /ralph-widget [toggle|compact|expand|show|hide]");
+    if (mode && mode !== "toggle") throw new Error("Usage: /loop-widget [toggle|compact|expand|show|hide]");
     return densityToggleWidget(ctx);
   }
 
@@ -114,27 +114,27 @@ export default function (pi: ExtensionAPI) {
   async function startLoop(args: string, ctx: ExtensionContext): Promise<void> {
     const argv = splitArgs(args);
     const name = argv.shift();
-    if (!name) throw new Error("Usage: /ralph-start <name> [--max N] [--todo item ...]");
+    if (!name) throw new Error("Usage: /loop-start <name> [--max N] [--todo item ...]");
     const defaultWorkerModel = parseModel(argv);
     const state = await new RalphOrchestrator(ctx.cwd, packageRoot).start({ name, todos: parseTodos(argv), maxIterations: parseMax(argv), defaultWorkerModel, defaultWorkerContextWindow: resolveWorkerContextWindow(ctx, defaultWorkerModel) });
     setCurrent(ctx, state);
-    ctx.ui.notify(`Prepared Ralph loop: ${state.name}. Use /ralph-run ${state.name} to run queued work.`, "info");
+    ctx.ui.notify(`Prepared Subagent Loop loop: ${state.name}. Use /loop-run ${state.name} to run queued work.`, "info");
   }
 
   async function pauseLoop(args: string, ctx: ExtensionContext): Promise<void> {
     const name = splitArgs(args).shift() ?? currentLoop;
-    if (!name) throw new Error("Usage: /ralph-pause [name]");
+    if (!name) throw new Error("Usage: /loop-pause [name]");
     const state = await new RalphOrchestrator(ctx.cwd, packageRoot).pause(name);
     updateUI(ctx, state);
-    ctx.ui.notify(activeJobs.has(state.name) ? `Paused Ralph loop after the current worker exits: ${state.name}` : `Paused Ralph loop: ${state.name}`, "info");
+    ctx.ui.notify(activeJobs.has(state.name) ? `Paused Subagent Loop after the current worker exits: ${state.name}` : `Paused Subagent Loop: ${state.name}`, "info");
   }
 
   async function killLoop(args: string, ctx: ExtensionContext): Promise<void> {
     const name = splitArgs(args).shift() ?? currentLoop;
-    if (!name) throw new Error("Usage: /ralph-kill [name]");
+    if (!name) throw new Error("Usage: /loop-kill [name]");
     const { state, killed } = await new RalphOrchestrator(ctx.cwd, packageRoot).kill(name);
     updateUI(ctx, state);
-    ctx.ui.notify(`Killed ${killed} Ralph worker process${killed === 1 ? "" : "es"} for ${state.name}. Inspect status and git status before running again.`, killed > 0 ? "warning" : "info");
+    ctx.ui.notify(`Killed ${killed} Subagent Loop worker process${killed === 1 ? "" : "es"} for ${state.name}. Inspect status and git status before running again.`, killed > 0 ? "warning" : "info");
   }
 
   async function showStatus(args: string, ctx: ExtensionContext): Promise<void> {
@@ -149,12 +149,12 @@ export default function (pi: ExtensionAPI) {
     const states = await orchestrator.list();
     const active = currentLoop ? states.find((state) => state.name === currentLoop) : states.find((state) => deriveLoopStatus(state) === "running") ?? states.find((state) => deriveLoopStatus(state) === "ready");
     if (active) updateUI(ctx, active);
-    ctx.ui.notify(`Ralph status:\n${active ? renderStatus(active) : renderLoopList(states)}`, "info");
+    ctx.ui.notify(`Subagent Loop status:\n${active ? renderStatus(active) : renderLoopList(states)}`, "info");
   }
 
   async function showList(_args: string, ctx: ExtensionContext): Promise<void> {
     const states = await new RalphOrchestrator(ctx.cwd, packageRoot).list();
-    ctx.ui.notify(`Ralph loops:\n${renderLoopList(states)}`, "info");
+    ctx.ui.notify(`Subagent Loops:\n${renderLoopList(states)}`, "info");
     const active = states.find((state) => deriveLoopStatus(state) === "running") ?? states.find((state) => deriveLoopStatus(state) === "ready");
     if (active) setCurrent(ctx, active);
   }
@@ -164,7 +164,7 @@ export default function (pi: ExtensionAPI) {
     const name = argv.shift() ?? currentLoop;
     const todoId = argv.shift();
     const model = parseModel(argv) ?? argv.shift();
-    if (!name || !todoId) throw new Error("Usage: /ralph-assign-model <loop> <todo-id> [--model MODEL]");
+    if (!name || !todoId) throw new Error("Usage: /loop-assign-model <loop> <todo-id> [--model MODEL]");
     const clear = !model || model === "--clear" || model === "clear";
     const result = await new RalphOrchestrator(ctx.cwd, packageRoot).assignTodoModel({ name, todoId, model: clear ? null : model, contextWindow: clear ? null : resolveWorkerContextWindow(ctx, model) });
     updateUI(ctx, result.state);
@@ -174,13 +174,13 @@ export default function (pi: ExtensionAPI) {
   async function runLoop(args: string, ctx: ExtensionContext): Promise<void> {
     const argv = splitArgs(args);
     const name = argv.shift() ?? currentLoop;
-    if (!name) throw new Error("Usage: /ralph-run [name] [--max N] [--runner pi-json] [--model MODEL]");
+    if (!name) throw new Error("Usage: /loop-run [name] [--max N] [--runner pi-json] [--model MODEL]");
     const loopName = slugifyLoopName(name);
     const maxIterations = parseMax(argv) ?? 1;
-    startBackgroundLoop(ctx, loopName, `Ralph run for ${loopName}`, async () => {
+    startBackgroundLoop(ctx, loopName, `Subagent Loop run for ${loopName}`, async () => {
       const workerModel = parseModel(argv);
       const state = await new RalphOrchestrator(ctx.cwd, packageRoot).run(loopName, { maxIterations, workerMode: parseRunner(argv), workerModel, workerContextWindow: resolveWorkerContextWindow(ctx, workerModel), onProgress: commandProgress(ctx), onIterationComplete: postIterationSummary });
-      return { state, message: `Ralph run stopped at ${state.currentIteration} (${deriveLoopStatus(state)})` };
+      return { state, message: `Subagent Loop run stopped at ${state.currentIteration} (${deriveLoopStatus(state)})` };
     }, async () => {
       const state = await new RalphOrchestrator(ctx.cwd, packageRoot).extendRun(loopName, maxIterations, "command");
       updateUI(ctx, state);
@@ -191,11 +191,11 @@ export default function (pi: ExtensionAPI) {
   function startBackgroundLoop(ctx: ExtensionContext, name: string, label: string, execute: () => Promise<{ state: LoopState; message: string }>, extendActive?: () => Promise<LoopState>, extensionCount = 1): void {
     if (activeJobs.has(name)) {
       if (!extendActive) {
-        ctx.ui.notify(`Ralph loop is already running: ${name}`, "warning");
+        ctx.ui.notify(`Subagent Loop is already running: ${name}`, "warning");
         return;
       }
       void extendActive()
-        .then((state) => ctx.ui.notify(`Queued ${extensionCount} additional Ralph iteration${extensionCount === 1 ? "" : "s"} for ${state.name}.`, "info"))
+        .then((state) => ctx.ui.notify(`Queued ${extensionCount} additional loop iteration${extensionCount === 1 ? "" : "s"} for ${state.name}.`, "info"))
         .catch((error) => ctx.ui.notify(error instanceof Error ? error.message : String(error), "error"));
       return;
     }
@@ -212,18 +212,18 @@ export default function (pi: ExtensionAPI) {
         activeJobs.delete(name);
       });
     activeJobs.set(name, job);
-    ctx.ui.notify(`${label} started in the background. You can keep chatting; progress will update in the Ralph widget.`, "info");
+    ctx.ui.notify(`${label} started in the background. You can keep chatting; progress will update in the Subagent Loop widget.`, "info");
   }
 
-  pi.registerCommand("ralph-start", command("Start a Ralph orchestrator loop", startLoop));
-  pi.registerCommand("ralph-pause", command("Pause active Ralph orchestrator loop", pauseLoop));
-  pi.registerCommand("ralph-kill", command("Kill active Ralph worker process and pause the loop", killLoop));
-  pi.registerCommand("ralph-status", command("Show current or named Ralph loop status", showStatus));
-  pi.registerCommand("ralph-list", command("List Ralph orchestrator loops", showList));
-  pi.registerCommand("ralph-run", command("Run one or more Ralph worker iterations", runLoop));
-  pi.registerCommand("ralph-assign-model", command("Assign a worker model to a future Ralph todo", assignTodoModel));
-  pi.registerCommand("ralph-widget", {
-    description: "Set Ralph widget mode (compact, expand, show, or hide)",
+  pi.registerCommand("loop-start", command("Start a Subagent Loop loop", startLoop));
+  pi.registerCommand("loop-pause", command("Pause active Subagent Loop loop", pauseLoop));
+  pi.registerCommand("loop-kill", command("Kill active Subagent Loop worker process and pause the loop", killLoop));
+  pi.registerCommand("loop-status", command("Show current or named Subagent Loop status", showStatus));
+  pi.registerCommand("loop-list", command("List Subagent Loop loops", showList));
+  pi.registerCommand("loop-run", command("Run one or more Subagent Loop worker iterations", runLoop));
+  pi.registerCommand("loop-assign-model", command("Assign a worker model to a future loop todo", assignTodoModel));
+  pi.registerCommand("loop-widget", {
+    description: "Set Subagent Loop widget mode (compact, expand, show, or hide)",
     handler: async (args, ctx) => {
       try {
         await toggleWidget(args, ctx);
@@ -233,21 +233,21 @@ export default function (pi: ExtensionAPI) {
     },
   });
   pi.registerShortcut("ctrl+alt+r", {
-    description: "Expand/contract the Ralph widget",
+    description: "Expand/contract the Subagent Loop widget",
     handler: async (ctx) => densityToggleWidget(ctx),
   });
 
-  pi.registerCommand("ralph-plan", {
-    description: "Plan a Ralph loop through a grilling/planning interview before starting",
+  pi.registerCommand("loop-plan", {
+    description: "Plan a Subagent Loop through a grilling/planning interview before starting",
     handler: async (args, ctx) => {
       const prompt = buildPlanPrompt(args.trim());
-      ctx.ui.notify("Starting Ralph planning interview. The agent should grill, plan, and ask for approval before starting a loop.", "info");
+      ctx.ui.notify("Starting Subagent Loop planning interview. The agent should grill, plan, and ask for approval before starting a loop.", "info");
       pi.sendUserMessage(prompt);
     },
   });
 
   pi.registerCommand("ralph", {
-    description: "Ralph Orchestrator - fresh-context development loops",
+    description: "Subagent Loop - fresh-context development loops",
     handler: async (args, ctx) => {
       const argv = splitArgs(args ?? "");
       const subcommand = argv.shift();
@@ -272,22 +272,22 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.registerTool({
-    name: "ralph_orchestrator_plan",
-    label: "Plan Ralph Loop",
-    description: "Start a Ralph planning interview before creating a loop.",
-    promptSnippet: "Plan a Ralph loop by grilling requirements before calling ralph_orchestrator_start.",
+    name: "subagent_loop_plan",
+    label: "Plan Subagent Loop",
+    description: "Start a Subagent Loop planning interview before creating a loop.",
+    promptSnippet: "Plan a Subagent Loop by grilling requirements before calling subagent_loop_start.",
     parameters: Type.Object({ request: Type.String({ description: "The user's planning request or goal" }) }),
     async execute(_toolCallId, params) {
       pi.sendUserMessage(buildPlanPrompt(params.request), { deliverAs: "followUp" });
-      return { content: [{ type: "text", text: "Queued a Ralph planning interview." }], details: {} };
+      return { content: [{ type: "text", text: "Queued a Subagent Loop planning interview." }], details: {} };
     },
   });
 
   pi.registerTool({
-    name: "ralph_orchestrator_start",
-    label: "Start Ralph Orchestrator",
-    description: "Create a Ralph orchestrator loop from a natural-language task.",
-    promptSnippet: "Create a Ralph orchestrator loop with a plan, todo list, and max-iteration setting.",
+    name: "subagent_loop_start",
+    label: "Start Subagent Loop",
+    description: "Create a Subagent Loop loop from a natural-language task.",
+    promptSnippet: "Create a Subagent Loop loop with a plan, todo list, and max-iteration setting.",
     parameters: Type.Object({
       name: Type.String({ description: "Short loop name" }),
       taskContent: Type.String({ description: "Markdown plan with goals, checklist, notes, and verification expectations" }),
@@ -299,15 +299,15 @@ export default function (pi: ExtensionAPI) {
       const todos = params.todos?.length ? params.todos : extractTodos(params.taskContent);
       const state = await new RalphOrchestrator(ctx.cwd, packageRoot).start({ name: params.name, todos, maxIterations: params.maxIterations, defaultWorkerModel: params.defaultWorkerModel, defaultWorkerContextWindow: resolveWorkerContextWindow(ctx, params.defaultWorkerModel) });
       setCurrent(ctx, state);
-      return { content: [{ type: "text", text: renderToolResponse(state, `Created Ralph orchestrator loop "${state.name}" with ${state.todos.length} todos.`) }], details: { state, nextAction: nextActionForState(state) } };
+      return { content: [{ type: "text", text: renderToolResponse(state, `Created Subagent Loop loop "${state.name}" with ${state.todos.length} todos.`) }], details: { state, nextAction: nextActionForState(state) } };
     },
   });
 
   pi.registerTool({
-    name: "ralph_orchestrator_run",
-    label: "Run Ralph Loop",
-    description: "Run one or more worker iterations for a Ralph orchestrator loop. Running a paused loop resumes it.",
-    promptSnippet: "Run a Ralph loop for a bounded number of iterations, then inspect status and artifacts.",
+    name: "subagent_loop_run",
+    label: "Run Subagent Loop",
+    description: "Run one or more worker iterations for a Subagent Loop loop. Running a paused loop resumes it.",
+    promptSnippet: "Run a Subagent Loop for a bounded number of iterations, then inspect status and artifacts.",
     parameters: Type.Object({
       name: Type.Optional(Type.String({ description: "Loop name. Defaults to the current active loop when available." })),
       maxIterations: Type.Optional(Type.Number({ description: "Maximum number of worker iterations to run in this call." })),
@@ -316,33 +316,33 @@ export default function (pi: ExtensionAPI) {
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const name = params.name ?? currentLoop;
-      if (!name) throw new Error("No Ralph loop name provided and no active loop is set.");
+      if (!name) throw new Error("No Subagent Loop name provided and no active loop is set.");
       const loopName = slugifyLoopName(name);
       currentLoop = loopName;
       const maxIterations = params.maxIterations ?? 1;
       if (activeJobs.has(loopName)) {
         const state = await new RalphOrchestrator(ctx.cwd, packageRoot).extendRun(loopName, maxIterations, "tool");
         updateUI(ctx, state);
-        return { content: [{ type: "text", text: `Queued ${maxIterations} additional Ralph iteration${maxIterations === 1 ? "" : "s"} for "${state.name}".` }], details: { state, nextAction: `Continue chatting normally, or use /ralph-pause ${state.name} to pause after the current worker exits.` } };
+        return { content: [{ type: "text", text: `Queued ${maxIterations} additional loop iteration${maxIterations === 1 ? "" : "s"} for "${state.name}".` }], details: { state, nextAction: `Continue chatting normally, or use /loop-pause ${state.name} to pause after the current worker exits.` } };
       }
       const job = new RalphOrchestrator(ctx.cwd, packageRoot)
         .run(loopName, { maxIterations, workerMode: parseRunnerValue(params.runner), workerModel: params.model, workerContextWindow: resolveWorkerContextWindow(ctx, params.model), onProgress: commandProgress(ctx), onIterationComplete: postIterationSummary })
         .then((state) => {
           setCurrent(ctx, state);
-          ctx.ui.notify(`Ralph run stopped at ${state.currentIteration} (${deriveLoopStatus(state)})`, "info");
+          ctx.ui.notify(`Subagent Loop run stopped at ${state.currentIteration} (${deriveLoopStatus(state)})`, "info");
         })
         .catch((error) => ctx.ui.notify(error instanceof Error ? error.message : String(error), "error"))
         .finally(() => activeJobs.delete(loopName));
       activeJobs.set(loopName, job);
-      return { content: [{ type: "text", text: `Started Ralph run for "${loopName}" in the background. You can keep chatting; progress will update in the Ralph widget.` }], details: { state: { name: loopName, control: "active", maxIterations }, nextAction: `Continue chatting normally, or use /ralph-pause ${loopName} to pause after the current worker exits.` } };
+      return { content: [{ type: "text", text: `Started Subagent Loop run for "${loopName}" in the background. You can keep chatting; progress will update in the Subagent Loop widget.` }], details: { state: { name: loopName, control: "active", maxIterations }, nextAction: `Continue chatting normally, or use /loop-pause ${loopName} to pause after the current worker exits.` } };
     },
   });
 
   pi.registerTool({
-    name: "ralph_orchestrator_insert_todo",
-    label: "Insert Ralph Todo",
-    description: "Safely insert a deferred semantic-ID todo into an existing Ralph loop at an array position without renumbering existing todos.",
-    promptSnippet: "Insert a new Ralph todo with an explicit semantic ID at insertAtIndex; dry-run first when the user wants a preview.",
+    name: "subagent_loop_insert_todo",
+    label: "Insert Loop Todo",
+    description: "Safely insert a deferred semantic-ID todo into an existing Subagent Loop at an array position without renumbering existing todos.",
+    promptSnippet: "Insert a new loop todo with an explicit semantic ID at insertAtIndex; dry-run first when the user wants a preview.",
     parameters: Type.Object({
       name: Type.Optional(Type.String({ description: "Loop name. Defaults to the current active loop when available." })),
       id: Type.String({ description: "Unique semantic todo ID, e.g. 003.1-add-logging or ISSUE-005.1." }),
@@ -354,20 +354,20 @@ export default function (pi: ExtensionAPI) {
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const name = params.name ?? currentLoop;
-      if (!name) throw new Error("No Ralph loop name provided and no active loop is set.");
+      if (!name) throw new Error("No Subagent Loop name provided and no active loop is set.");
       const loopName = slugifyLoopName(name);
-      if (activeJobs.has(loopName)) throw new Error(`Cannot insert a Ralph todo while loop is running: ${loopName}. Pause or wait for the active worker to finish first.`);
+      if (activeJobs.has(loopName)) throw new Error(`Cannot insert a loop todo while loop is running: ${loopName}. Pause or wait for the active worker to finish first.`);
       const result = await new RalphOrchestrator(ctx.cwd, packageRoot).insertTodo({ name: loopName, id: params.id, title: params.title, insertAtIndex: params.insertAtIndex, status: params.status, workerModel: params.model, workerContextWindow: resolveWorkerContextWindow(ctx, params.model), dryRun: params.dryRun });
       if (!result.dryRun) updateUI(ctx, result.state);
-      return { content: [{ type: "text", text: renderInsertTodoResponse(result) }], details: { ...result, nextAction: result.dryRun ? "If the preview looks correct, call ralph_orchestrator_insert_todo again with dryRun false or omitted." : nextActionForState(result.state) } };
+      return { content: [{ type: "text", text: renderInsertTodoResponse(result) }], details: { ...result, nextAction: result.dryRun ? "If the preview looks correct, call subagent_loop_insert_todo again with dryRun false or omitted." : nextActionForState(result.state) } };
     },
   });
 
   pi.registerTool({
-    name: "ralph_orchestrator_assign_todo_model",
-    label: "Assign Ralph Todo Model",
-    description: "Assign, update, or clear a persisted child-worker model override for a queued/deferred future Ralph todo.",
-    promptSnippet: "Assign a Pi model to a future Ralph todo; do not use this to change an active running worker.",
+    name: "subagent_loop_assign_todo_model",
+    label: "Assign Loop Todo Model",
+    description: "Assign, update, or clear a persisted child-worker model override for a queued/deferred future loop todo.",
+    promptSnippet: "Assign a Pi model to a future loop todo; do not use this to change an active running worker.",
     parameters: Type.Object({
       name: Type.Optional(Type.String({ description: "Loop name. Defaults to the current active loop when available." })),
       todoId: Type.String({ description: "Todo ID to update." }),
@@ -376,7 +376,7 @@ export default function (pi: ExtensionAPI) {
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const name = params.name ?? currentLoop;
-      if (!name) throw new Error("No Ralph loop name provided and no active loop is set.");
+      if (!name) throw new Error("No Subagent Loop name provided and no active loop is set.");
       const result = await new RalphOrchestrator(ctx.cwd, packageRoot).assignTodoModel({ name, todoId: params.todoId, model: params.model ?? null, contextWindow: params.model ? resolveWorkerContextWindow(ctx, params.model) : null, dryRun: params.dryRun });
       if (!result.dryRun) updateUI(ctx, result.state);
       const action = result.cleared ? "Cleared" : result.dryRun ? "Dry run: would assign" : "Assigned";
@@ -385,75 +385,68 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.registerTool({
-    name: "ralph_orchestrator_pause",
-    label: "Pause Ralph Loop",
-    description: "Pause a Ralph loop after the current worker iteration exits. Does not kill the active child process.",
-    promptSnippet: "Pause the active Ralph loop after the current worker exits.",
+    name: "subagent_loop_pause",
+    label: "Pause Subagent Loop Loop",
+    description: "Pause a Subagent Loop after the current worker iteration exits. Does not kill the active child process.",
+    promptSnippet: "Pause the active Subagent Loop after the current worker exits.",
     parameters: Type.Object({ name: Type.Optional(Type.String({ description: "Loop name. Defaults to the current active loop when available." })) }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const name = params.name ?? currentLoop;
-      if (!name) throw new Error("No Ralph loop name provided and no active loop is set.");
+      if (!name) throw new Error("No Subagent Loop name provided and no active loop is set.");
       const state = await new RalphOrchestrator(ctx.cwd, packageRoot).pause(name);
       updateUI(ctx, state);
-      return { content: [{ type: "text", text: renderToolResponse(state, activeJobs.has(state.name) ? `Ralph loop "${state.name}" will pause after the current worker exits.` : `Paused Ralph loop "${state.name}".`) }], details: { state, nextAction: nextActionForState(state) } };
+      return { content: [{ type: "text", text: renderToolResponse(state, activeJobs.has(state.name) ? `Subagent Loop "${state.name}" will pause after the current worker exits.` : `Paused Subagent Loop "${state.name}".`) }], details: { state, nextAction: nextActionForState(state) } };
     },
   });
 
   pi.registerTool({
-    name: "ralph_orchestrator_kill",
-    label: "Kill Ralph Worker",
-    description: "Kill active child Pi worker processes for a Ralph loop, then pause for inspection/recovery.",
-    promptSnippet: "Kill the active Ralph worker only when the user asks for an immediate abort/kill.",
+    name: "subagent_loop_kill",
+    label: "Kill Subagent Loop Worker",
+    description: "Kill active child Pi worker processes for a Subagent Loop, then pause for inspection/recovery.",
+    promptSnippet: "Kill the active Subagent Loop worker only when the user asks for an immediate abort/kill.",
     parameters: Type.Object({ name: Type.Optional(Type.String({ description: "Loop name. Defaults to the current active loop when available." })) }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const name = params.name ?? currentLoop;
-      if (!name) throw new Error("No Ralph loop name provided and no active loop is set.");
+      if (!name) throw new Error("No Subagent Loop name provided and no active loop is set.");
       const { state, killed } = await new RalphOrchestrator(ctx.cwd, packageRoot).kill(name);
       updateUI(ctx, state);
-      return { content: [{ type: "text", text: `${killed > 0 ? "Killed" : "No active worker process found for"} Ralph loop "${state.name}" (${killed} process${killed === 1 ? "" : "es"}).\n\nInspect status and git status before running again; partial edits may remain.` }], details: { state, killed, nextAction: "Inspect ralph_orchestrator_status and git status before ralph_orchestrator_run." } };
+      return { content: [{ type: "text", text: `${killed > 0 ? "Killed" : "No active worker process found for"} Subagent Loop "${state.name}" (${killed} process${killed === 1 ? "" : "es"}).\n\nInspect status and git status before running again; partial edits may remain.` }], details: { state, killed, nextAction: "Inspect subagent_loop_status and git status before subagent_loop_run." } };
     },
   });
 
   pi.registerTool({
-    name: "ralph_orchestrator_status",
+    name: "subagent_loop_status",
     label: "Ralph Status",
-    description: "Inspect status for the active or named Ralph orchestrator loop.",
-    promptSnippet: "Check Ralph loop status before deciding whether to continue, pause, kill, or inspect artifacts.",
+    description: "Inspect status for the active or named Subagent Loop loop.",
+    promptSnippet: "Check Subagent Loop status before deciding whether to continue, pause, kill, or inspect artifacts.",
     parameters: Type.Object({ name: Type.Optional(Type.String({ description: "Loop name. Defaults to the current active loop when available." })) }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const orchestrator = new RalphOrchestrator(ctx.cwd, packageRoot);
       const name = params.name ?? currentLoop;
       if (!name) {
         const states = await orchestrator.list();
-        return { content: [{ type: "text", text: `Ralph loops:\n${renderLoopList(states)}` }], details: { states, nextAction: states.length ? "Pick a loop name, then call ralph_orchestrator_status or ralph_orchestrator_run." : "Create a loop with ralph_orchestrator_start." } };
+        return { content: [{ type: "text", text: `Subagent Loops:\n${renderLoopList(states)}` }], details: { states, nextAction: states.length ? "Pick a loop name, then call subagent_loop_status or subagent_loop_run." : "Create a loop with subagent_loop_start." } };
       }
       const state = await orchestrator.status(name);
       updateUI(ctx, state);
-      return { content: [{ type: "text", text: renderToolResponse(state, `Status for Ralph loop "${state.name}".`) }], details: { state, nextAction: nextActionForState(state), artifacts: iterationArtifacts(state) } };
+      return { content: [{ type: "text", text: renderToolResponse(state, `Status for Subagent Loop "${state.name}".`) }], details: { state, nextAction: nextActionForState(state), artifacts: iterationArtifacts(state) } };
     },
   });
 
   pi.registerTool({
-    name: "ralph_orchestrator_list",
-    label: "List Ralph Loops",
-    description: "List Ralph orchestrator loops in this workspace.",
-    promptSnippet: "List available Ralph loops when the user asks what is running or when no active loop is known.",
+    name: "subagent_loop_list",
+    label: "List Subagent Loops",
+    description: "List Subagent Loop loops in this workspace.",
+    promptSnippet: "List available Subagent Loops when the user asks what is running or when no active loop is known.",
     parameters: Type.Object({}),
     async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
       const states = await new RalphOrchestrator(ctx.cwd, packageRoot).list();
       const active = states.find((state) => deriveLoopStatus(state) === "running") ?? states.find((state) => deriveLoopStatus(state) === "ready") ?? null;
       if (active) setCurrent(ctx, active);
-      return { content: [{ type: "text", text: `Ralph loops:\n${renderLoopList(states)}` }], details: { states, nextAction: active ? `Active candidate: ${active.name}. Call ralph_orchestrator_status or ralph_orchestrator_run next.` : "Create a loop with ralph_orchestrator_start." } };
+      return { content: [{ type: "text", text: `Subagent Loops:\n${renderLoopList(states)}` }], details: { states, nextAction: active ? `Active candidate: ${active.name}. Call subagent_loop_status or subagent_loop_run next.` : "Create a loop with subagent_loop_start." } };
     },
   });
 
-  pi.on("input", async (event) => {
-    if (event.source === "extension") return { action: "continue" as const };
-    if (/\bralph\b/i.test(event.text) && /\b(loop|loops|iterate|iterations|issues?|todos?|insert|pause|resume|run|kill|abort|status|list)\b/i.test(event.text) && !event.text.startsWith("/")) {
-      return { action: "transform" as const, text: `${event.text}\n\nIf this is a request to create, manage, insert todos into, pause, resume by running, kill, or inspect a Ralph loop, use ralph_orchestrator_start, ralph_orchestrator_insert_todo, ralph_orchestrator_run, ralph_orchestrator_pause, ralph_orchestrator_kill, ralph_orchestrator_status, or ralph_orchestrator_list as appropriate.` };
-    }
-    return { action: "continue" as const };
-  });
 
   pi.on("session_start", async (_event, ctx) => {
     const states = await new RalphOrchestrator(ctx.cwd, packageRoot).list();
@@ -477,25 +470,25 @@ function command(description: string, handler: (args: string, ctx: ExtensionCont
   };
 }
 
-const HELP = `Ralph Orchestrator - fresh-context development loops
+const HELP = `Subagent Loop - fresh-context development loops
 
 Primary commands:
-  /ralph-plan <goal>                               Plan/grill a loop before starting
-  /ralph-start <name> [--max N] [--model MODEL] [--todo item ...] Start a loop
-  /ralph-run [name] [--max N] [--runner pi-json] [--model MODEL] Run queued work; resumes a paused loop
-  /ralph-assign-model <loop> <todo-id> [--model MODEL] Assign/clear future todo worker model
-  /ralph-pause [name]                              Pause after the current worker exits
-  /ralph-kill [name]                               Kill the current Ralph worker process and pause
-  /ralph-status [name]                             Show current or named loop status
-  /ralph-list                                      List all loops
-  /ralph-widget [toggle|compact|expand|show|hide] Set Ralph widget mode (Ctrl+Opt+R expands/contracts)
+  /loop-plan <goal>                               Plan/grill a loop before starting
+  /loop-start <name> [--max N] [--model MODEL] [--todo item ...] Start a loop
+  /loop-run [name] [--max N] [--runner pi-json] [--model MODEL] Run queued work; resumes a paused loop
+  /loop-assign-model <loop> <todo-id> [--model MODEL] Assign/clear future todo worker model
+  /loop-pause [name]                              Pause after the current worker exits
+  /loop-kill [name]                               Kill the current Subagent Loop worker process and pause
+  /loop-status [name]                             Show current or named loop status
+  /loop-list                                      List all loops
+  /loop-widget [toggle|compact|expand|show|hide] Set Subagent Loop widget mode (Ctrl+Opt+R expands/contracts)
 
 Natural usage:
   Ask: "Can we set up a ralph loop to get through our issues? Max of 5 loops."`;
 
 function buildPlanPrompt(request: string): string {
-  const goal = request || "Plan a Ralph loop for the work I want to accomplish.";
-  return `/skill:ralph-plan ${goal}`;
+  const goal = request || "Plan a Subagent Loop for the work I want to accomplish.";
+  return `/skill:subagent-loop ${goal}`;
 }
 
 function splitArgs(input: string): string[] {
@@ -570,7 +563,7 @@ function renderInsertTodoResponse(result: InsertTodoResult): string {
     .filter((todo) => todo.id !== result.insertedTodo.id)
     .map((todo) => `#${todo.id}`)
     .join(", ");
-  return `${action} Ralph todo #${result.insertedTodo.id} at index ${result.insertAtIndex}: ${result.insertedTodo.title}\n\nChanges:\n- status: ${result.insertedTodo.status}\n- existing todo IDs preserved: ${preserved || "none"}${maxChange}\n\n${renderStatus(result.state)}\n\nNext action: ${result.dryRun ? "Review the preview, then insert without dryRun if approved." : nextActionForState(result.state)}`;
+  return `${action} loop todo #${result.insertedTodo.id} at index ${result.insertAtIndex}: ${result.insertedTodo.title}\n\nChanges:\n- status: ${result.insertedTodo.status}\n- existing todo IDs preserved: ${preserved || "none"}${maxChange}\n\n${renderStatus(result.state)}\n\nNext action: ${result.dryRun ? "Review the preview, then insert without dryRun if approved." : nextActionForState(result.state)}`;
 }
 
 type RalphTheme = ExtensionContext["ui"]["theme"];
@@ -963,18 +956,18 @@ function formatElapsed(ms: number): string {
 
 function nextActionForState(state: LoopState): string {
   const status = deriveLoopStatus(state);
-  if (status === "ready") return `Loop is ready. Use ralph_orchestrator_run or /ralph-run ${state.name} --max N.`;
+  if (status === "ready") return `Loop is ready. Use subagent_loop_run or /loop-run ${state.name} --max N.`;
   if (status === "running") return `Loop is running. Chat to pause, kill, or steer the orchestrator.`;
   if (status === "completed") return "Loop is complete. Inspect artifacts or start a new loop.";
   if (status === "needs_attention") return "Loop needs attention. Inspect status and git status before running again.";
-  return `Loop is paused. Run it again with /ralph-run ${state.name} when ready.`;
+  return `Loop is paused. Run it again with /loop-run ${state.name} when ready.`;
 }
 
 function renderIterationSummary(event: IterationCompleteEvent): string {
   const { state, iteration, todo, result } = event;
   const passed = result.verification.status === "passed";
   const lines = [
-    `${passed ? "✓" : "✗"} Ralph iteration #${iteration.number} ${passed ? "completed and verified" : "needs attention"}`,
+    `${passed ? "✓" : "✗"} loop iteration #${iteration.number} ${passed ? "completed and verified" : "needs attention"}`,
     "",
     `Loop: ${state.name}`,
     `Task: #${todo.id} ${todo.title}`,

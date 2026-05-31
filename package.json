@@ -1,14 +1,15 @@
 {
-  "name": "@keydown-dev/pi-ralph-orchestrator",
+  "name": "@keydown-dev/pi-subagent-loop",
   "version": "0.0.1",
   "description": "Subagent Loop fresh-context worker orchestration for Pi with git checkpoints and handoff artifacts.",
   "type": "module",
   "keywords": [
     "pi-package",
     "pi",
+    "subagent",
     "ralph",
+    "wiggum",
     "orchestrator",
-    "subagent-loop",
     "subagents",
     "fresh-context",
     "loop"

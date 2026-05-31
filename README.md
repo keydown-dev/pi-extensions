@@ -9,19 +9,19 @@ Subagent Loop creates local loop artifacts, orchestration branches, before/after
 Install directly from GitHub:
 
 ```bash
-pi install git:github.com/keydown-dev/pi-ralph-subagents
+pi install git:github.com/keydown-dev/pi-subagent-loop
 ```
 
 Or pin a specific branch, tag, or commit:
 
 ```bash
-pi install git:github.com/keydown-dev/pi-ralph-subagents@development
+pi install git:github.com/keydown-dev/pi-subagent-loop@development
 ```
 
 For a one-off trial without adding it to your Pi settings:
 
 ```bash
-pi -e git:github.com/keydown-dev/pi-ralph-subagents
+pi -e git:github.com/keydown-dev/pi-subagent-loop
 ```
 
 From a local checkout of this repo:

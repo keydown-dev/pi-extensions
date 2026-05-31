@@ -115,7 +115,8 @@ export default function (pi: ExtensionAPI) {
     const argv = splitArgs(args);
     const name = argv.shift();
     if (!name) throw new Error("Usage: /ralph-start <name> [--max N] [--todo item ...]");
-    const state = await new RalphOrchestrator(ctx.cwd, packageRoot).start({ name, todos: parseTodos(argv), maxIterations: parseMax(argv) });
+    const defaultWorkerModel = parseModel(argv);
+    const state = await new RalphOrchestrator(ctx.cwd, packageRoot).start({ name, todos: parseTodos(argv), maxIterations: parseMax(argv), defaultWorkerModel, defaultWorkerContextWindow: resolveWorkerContextWindow(ctx, defaultWorkerModel) });
     setCurrent(ctx, state);
     ctx.ui.notify(`Prepared Ralph loop: ${state.name}. Use /ralph-run ${state.name} to run queued work.`, "info");
   }
@@ -156,6 +157,18 @@ export default function (pi: ExtensionAPI) {
     ctx.ui.notify(`Ralph loops:\n${renderLoopList(states)}`, "info");
     const active = states.find((state) => deriveLoopStatus(state) === "running") ?? states.find((state) => deriveLoopStatus(state) === "ready");
     if (active) setCurrent(ctx, active);
+  }
+
+  async function assignTodoModel(args: string, ctx: ExtensionContext): Promise<void> {
+    const argv = splitArgs(args);
+    const name = argv.shift() ?? currentLoop;
+    const todoId = argv.shift();
+    const model = parseModel(argv) ?? argv.shift();
+    if (!name || !todoId) throw new Error("Usage: /ralph-assign-model <loop> <todo-id> [--model MODEL]");
+    const clear = !model || model === "--clear" || model === "clear";
+    const result = await new RalphOrchestrator(ctx.cwd, packageRoot).assignTodoModel({ name, todoId, model: clear ? null : model, contextWindow: clear ? null : resolveWorkerContextWindow(ctx, model) });
+    updateUI(ctx, result.state);
+    ctx.ui.notify(`${result.cleared ? "Cleared" : "Assigned"} worker model for #${result.todo.id}${result.todo.workerModel ? `: ${result.todo.workerModel}` : ""}.`, "info");
   }
 
   async function runLoop(args: string, ctx: ExtensionContext): Promise<void> {
@@ -208,6 +221,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("ralph-status", command("Show current or named Ralph loop status", showStatus));
   pi.registerCommand("ralph-list", command("List Ralph orchestrator loops", showList));
   pi.registerCommand("ralph-run", command("Run one or more Ralph worker iterations", runLoop));
+  pi.registerCommand("ralph-assign-model", command("Assign a worker model to a future Ralph todo", assignTodoModel));
   pi.registerCommand("ralph-widget", {
     description: "Set Ralph widget mode (compact, expand, show, or hide)",
     handler: async (args, ctx) => {
@@ -244,6 +258,7 @@ export default function (pi: ExtensionAPI) {
           return;
         }
         if (subcommand === "run") return runLoop(argv.join(" "), ctx);
+        if (subcommand === "assign-model") return assignTodoModel(argv.join(" "), ctx);
         if (subcommand === "pause") return pauseLoop(argv.join(" "), ctx);
         if (subcommand === "kill") return killLoop(argv.join(" "), ctx);
         if (subcommand === "status") return showStatus(argv.join(" "), ctx);
@@ -277,11 +292,12 @@ export default function (pi: ExtensionAPI) {
       name: Type.String({ description: "Short loop name" }),
       taskContent: Type.String({ description: "Markdown plan with goals, checklist, notes, and verification expectations" }),
       maxIterations: Type.Optional(Type.Number({ description: "Maximum number of tasks in the initial run scope" })),
+      defaultWorkerModel: Type.Optional(Type.String({ description: "Loop-level default Pi model pattern/ID for child workers." })),
       todos: Type.Optional(Type.Array(Type.String(), { description: "Concrete checklist items extracted from taskContent" })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const todos = params.todos?.length ? params.todos : extractTodos(params.taskContent);
-      const state = await new RalphOrchestrator(ctx.cwd, packageRoot).start({ name: params.name, todos, maxIterations: params.maxIterations });
+      const state = await new RalphOrchestrator(ctx.cwd, packageRoot).start({ name: params.name, todos, maxIterations: params.maxIterations, defaultWorkerModel: params.defaultWorkerModel, defaultWorkerContextWindow: resolveWorkerContextWindow(ctx, params.defaultWorkerModel) });
       setCurrent(ctx, state);
       return { content: [{ type: "text", text: renderToolResponse(state, `Created Ralph orchestrator loop "${state.name}" with ${state.todos.length} todos.`) }], details: { state, nextAction: nextActionForState(state) } };
     },
@@ -333,6 +349,7 @@ export default function (pi: ExtensionAPI) {
       title: Type.String({ description: "Title for the new todo, e.g. Complete plans/issues/005.1.md." }),
       insertAtIndex: Type.Optional(Type.Number({ description: "Zero-based array insertion position. Omit to append." })),
       status: Type.Optional(Type.Union([Type.Literal("deferred"), Type.Literal("queued")], { description: "Initial status for the inserted todo. Defaults to deferred." })),
+      model: Type.Optional(Type.String({ description: "Optional Pi model pattern/ID for this todo's worker." })),
       dryRun: Type.Optional(Type.Boolean({ description: "Preview the state change without writing state.json or plan.md." })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
@@ -340,9 +357,30 @@ export default function (pi: ExtensionAPI) {
       if (!name) throw new Error("No Ralph loop name provided and no active loop is set.");
       const loopName = slugifyLoopName(name);
       if (activeJobs.has(loopName)) throw new Error(`Cannot insert a Ralph todo while loop is running: ${loopName}. Pause or wait for the active worker to finish first.`);
-      const result = await new RalphOrchestrator(ctx.cwd, packageRoot).insertTodo({ name: loopName, id: params.id, title: params.title, insertAtIndex: params.insertAtIndex, status: params.status, dryRun: params.dryRun });
+      const result = await new RalphOrchestrator(ctx.cwd, packageRoot).insertTodo({ name: loopName, id: params.id, title: params.title, insertAtIndex: params.insertAtIndex, status: params.status, workerModel: params.model, workerContextWindow: resolveWorkerContextWindow(ctx, params.model), dryRun: params.dryRun });
       if (!result.dryRun) updateUI(ctx, result.state);
       return { content: [{ type: "text", text: renderInsertTodoResponse(result) }], details: { ...result, nextAction: result.dryRun ? "If the preview looks correct, call ralph_orchestrator_insert_todo again with dryRun false or omitted." : nextActionForState(result.state) } };
+    },
+  });
+
+  pi.registerTool({
+    name: "ralph_orchestrator_assign_todo_model",
+    label: "Assign Ralph Todo Model",
+    description: "Assign, update, or clear a persisted child-worker model override for a queued/deferred future Ralph todo.",
+    promptSnippet: "Assign a Pi model to a future Ralph todo; do not use this to change an active running worker.",
+    parameters: Type.Object({
+      name: Type.Optional(Type.String({ description: "Loop name. Defaults to the current active loop when available." })),
+      todoId: Type.String({ description: "Todo ID to update." }),
+      model: Type.Optional(Type.String({ description: "Pi model pattern/ID. Use an empty string to clear the override." })),
+      dryRun: Type.Optional(Type.Boolean({ description: "Preview without writing state.json or committing." })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const name = params.name ?? currentLoop;
+      if (!name) throw new Error("No Ralph loop name provided and no active loop is set.");
+      const result = await new RalphOrchestrator(ctx.cwd, packageRoot).assignTodoModel({ name, todoId: params.todoId, model: params.model ?? null, contextWindow: params.model ? resolveWorkerContextWindow(ctx, params.model) : null, dryRun: params.dryRun });
+      if (!result.dryRun) updateUI(ctx, result.state);
+      const action = result.cleared ? "Cleared" : result.dryRun ? "Dry run: would assign" : "Assigned";
+      return { content: [{ type: "text", text: `${action} worker model for #${result.todo.id}${result.todo.workerModel ? `: ${result.todo.workerModel}` : ""}.\n\n${renderStatus(result.state)}` }], details: { ...result, nextAction: nextActionForState(result.state) } };
     },
   });
 
@@ -443,8 +481,9 @@ const HELP = `Ralph Orchestrator - fresh-context development loops
 
 Primary commands:
   /ralph-plan <goal>                               Plan/grill a loop before starting
-  /ralph-start <name> [--max N] [--todo item ...]  Start a loop
+  /ralph-start <name> [--max N] [--model MODEL] [--todo item ...] Start a loop
   /ralph-run [name] [--max N] [--runner pi-json] [--model MODEL] Run queued work; resumes a paused loop
+  /ralph-assign-model <loop> <todo-id> [--model MODEL] Assign/clear future todo worker model
   /ralph-pause [name]                              Pause after the current worker exits
   /ralph-kill [name]                               Kill the current Ralph worker process and pause
   /ralph-status [name]                             Show current or named loop status
@@ -566,7 +605,7 @@ function renderTodoRow(todo: WidgetTodo, state: LoopState, worker: WorkerProgres
   const iconColor = todo.status === "complete" ? "success" : todo.status === "failed" || todo.status === "interrupted" ? "error" : todo.status === "running" ? "accent" : "dim";
   const rowColor = todo.status === "deferred" ? "dim" : todo.status === "running" ? "accent" : "text";
   const title = `${TODO_TITLE_PREFIX}${theme.fg(todo.status === "deferred" ? "dim" : iconColor, icon)}   ${theme.fg(rowColor, `#${todo.id} ${todo.title}`)}`;
-  const detail = `${TODO_DETAIL_PREFIX}${renderTodoDetail(todo.status, iteration, isRunning ? worker : undefined, worker, theme)}`;
+  const detail = `${TODO_DETAIL_PREFIX}${renderTodoDetail(todo, state, iteration, isRunning ? worker : undefined, worker, theme)}`;
   return [renderPanelLine(title, theme, width, { highlight: isRunning }), renderPanelLine(detail, theme, width, { highlight: isRunning })];
 }
 
@@ -775,7 +814,8 @@ function displayToolName(toolName: string): string {
     .join(" ");
 }
 
-function renderTodoDetail(status: LoopState["todos"][number]["status"], iteration: LoopState["iterations"][number] | undefined, worker: WorkerProgress | undefined, fallbackWorker: WorkerProgress | undefined, theme: RalphTheme): string {
+function renderTodoDetail(todo: LoopState["todos"][number], state: LoopState, iteration: LoopState["iterations"][number] | undefined, worker: WorkerProgress | undefined, fallbackWorker: WorkerProgress | undefined, theme: RalphTheme): string {
+  const status = todo.status;
   if (status === "running" && worker) {
     const segments: string[] = [];
     const model = displayModelName(worker.model ?? worker.configuredModel);
@@ -787,8 +827,7 @@ function renderTodoDetail(status: LoopState["todos"][number]["status"], iteratio
 
   if (status === "complete" || status === "failed" || status === "interrupted") {
     const segments: string[] = [];
-    const iterationWithModel = iteration as (LoopState["iterations"][number] & { model?: string; provider?: string }) | undefined;
-    const model = displayModelName(iterationWithModel?.model);
+    const model = displayModelName(iteration?.observedModel ?? iteration?.configuredModel ?? iteration?.model);
     if (model) segments.push(theme.fg("muted", model));
     segments.push(...renderUsageSegments(iteration?.usage, theme));
     const elapsed = renderIterationElapsed(iteration);
@@ -797,13 +836,13 @@ function renderTodoDetail(status: LoopState["todos"][number]["status"], iteratio
     return segments.join(theme.fg("muted", " · "));
   }
 
-  const placeholder = renderPlaceholderDetail(fallbackWorker, theme);
+  const placeholder = renderPlaceholderDetail(fallbackWorker, theme, todo.workerModel ?? state.workerDefaults?.model);
   return status === "deferred" ? theme.fg("dim", placeholder) : placeholder;
 }
 
-function renderPlaceholderDetail(worker: WorkerProgress | undefined, theme: RalphTheme): string {
+function renderPlaceholderDetail(worker: WorkerProgress | undefined, theme: RalphTheme, assignedModel?: string): string {
   const segments: string[] = [];
-  const model = displayModelName(worker?.model ?? worker?.configuredModel);
+  const model = displayModelName(worker?.model ?? worker?.configuredModel ?? assignedModel);
   if (model) segments.push(theme.fg("muted", model));
   segments.push(theme.fg("muted", renderTokenBreakdown({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 })));
   const contextWindow = worker?.latestUsage?.contextWindow ?? worker?.usage.contextWindow;

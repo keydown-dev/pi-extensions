@@ -6,7 +6,7 @@ import { slugifyLoopName } from "./paths.js";
 import { killRalphWorkerProcesses, PiJsonWorkerRunner } from "./pi-json-worker.js";
 import { ScriptedMathWorker } from "./scripted-worker.js";
 import { RalphStore } from "./store.js";
-import type { DerivedLoopStatus, InsertTodoOptions, InsertTodoResult, IterationState, LoopState, RalphTodo, RunOptions, StartOptions, WorkerProgress } from "./types.js";
+import type { AssignTodoModelOptions, AssignTodoModelResult, DerivedLoopStatus, InsertTodoOptions, InsertTodoResult, IterationState, LoopState, RalphTodo, RunOptions, StartOptions, WorkerProgress } from "./types.js";
 
 const DEFAULT_TODOS = ["Add subtract test and implementation", "Add multiply test and implementation", "Add divide test and implementation"];
 
@@ -27,7 +27,12 @@ export class RalphOrchestrator {
 
     const branch = orchestrationBranch(name);
     await this.git.checkoutBranch(branch);
-    const state = await this.store.createLoop(name, options.todos?.length ? options.todos : DEFAULT_TODOS, branch, options.maxIterations);
+    const workerDefaults = {
+      ...(options.defaultWorkerModel ? { model: options.defaultWorkerModel } : {}),
+      ...(options.defaultWorkerProvider ? { provider: options.defaultWorkerProvider } : {}),
+      ...(options.defaultWorkerContextWindow ? { contextWindow: options.defaultWorkerContextWindow } : {}),
+    };
+    const state = await this.store.createLoop(name, options.todos?.length ? options.todos : DEFAULT_TODOS, branch, options.maxIterations, workerDefaults);
     await this.git.addAllAndCommit(`orchestrator: start ${name}`);
     return state;
   }
@@ -56,6 +61,9 @@ export class RalphOrchestrator {
       id,
       title,
       status: options.status ?? "deferred",
+      ...(options.workerModel ? { workerModel: options.workerModel } : {}),
+      ...(options.workerProvider ? { workerProvider: options.workerProvider } : {}),
+      ...(options.workerContextWindow ? { workerContextWindow: options.workerContextWindow } : {}),
     };
     const nextState: LoopState = {
       ...state,
@@ -80,6 +88,36 @@ export class RalphOrchestrator {
       dryRun: options.dryRun ?? false,
       maxIterationsChange: maxIterationsBefore === undefined ? undefined : { before: maxIterationsBefore, after: maxIterationsBefore + 1 },
     };
+  }
+
+  async assignTodoModel(options: AssignTodoModelOptions): Promise<AssignTodoModelResult> {
+    const state = await this.store.readState(slugifyLoopName(options.name));
+    const todo = state.todos.find((item) => String(item.id) === String(options.todoId));
+    if (!todo) throw new Error(`Ralph todo not found in ${state.name}: ${options.todoId}`);
+    if (todo.status === "running") throw new Error(`Cannot change the active worker model for running todo ${todo.id}. Pause or wait for the worker to finish.`);
+    const cleared = options.model === null || options.model === "";
+    const nextTodo: RalphTodo = { ...todo };
+    if (cleared) {
+      delete nextTodo.workerModel;
+      delete nextTodo.workerProvider;
+      delete nextTodo.workerContextWindow;
+    } else {
+      if (options.model !== undefined) nextTodo.workerModel = options.model ?? undefined;
+      if (options.provider !== undefined) nextTodo.workerProvider = options.provider ?? undefined;
+      if (options.contextWindow !== undefined) nextTodo.workerContextWindow = options.contextWindow ?? undefined;
+    }
+    const nextState: LoopState = {
+      ...state,
+      todos: state.todos.map((item) => (String(item.id) === String(todo.id) ? nextTodo : item)),
+      iterations: [...state.iterations],
+    };
+    if (!options.dryRun) {
+      await this.store.writeState(nextState);
+      if (!state.iterations.some((iteration) => iteration.status === "running")) {
+        await this.git.addAllAndCommit(`orchestrator: assign model for ${todo.id} in ${state.name}`);
+      }
+    }
+    return { state: nextState, todo: nextTodo, dryRun: options.dryRun ?? false, cleared };
   }
 
   async pause(name: string): Promise<LoopState> {
@@ -136,12 +174,15 @@ export class RalphOrchestrator {
       return state;
     }
 
+    const effectiveWorker = resolveEffectiveWorker(todo, state, options);
     const iterationNumber = state.currentIteration + 1;
     const iteration: IterationState = {
       number: iterationNumber,
       status: "running",
       todoId: todo.id,
       beforeRef: beforeRef(state.name, iterationNumber),
+      ...(effectiveWorker.model ? { model: effectiveWorker.model, configuredModel: effectiveWorker.model } : {}),
+      ...(effectiveWorker.provider ? { configuredProvider: effectiveWorker.provider } : {}),
       startedAt: new Date().toISOString(),
     };
     state.currentIteration = iterationNumber;
@@ -167,8 +208,8 @@ export class RalphOrchestrator {
       loopDir: this.store.getLoopDir(state.name),
       iterationDir: this.store.getIterationDir(state.name, iterationNumber),
       packageRoot: this.packageRoot,
-      workerModel: options.workerModel,
-      workerContextWindow: options.workerContextWindow,
+      workerModel: effectiveWorker.model,
+      workerContextWindow: effectiveWorker.contextWindow,
       state,
       iteration,
       todo,
@@ -177,6 +218,14 @@ export class RalphOrchestrator {
     result.changedFiles = result.changedFiles.length > 0 ? result.changedFiles : await this.git.changedPaths();
     iteration.diff = await this.git.diffStats("HEAD", { excludePrefixes: [".ralph"], includeUntracked: true });
     iteration.usage = result.usage;
+    if (result.model) {
+      iteration.observedModel = result.model;
+      iteration.model = result.model;
+    }
+    if (result.provider) {
+      iteration.observedProvider = result.provider;
+      iteration.provider = result.provider;
+    }
     iteration.summary = result.summary;
     iteration.changedFiles = result.changedFiles;
     iteration.commitSubject = result.commitSubject;
@@ -271,12 +320,26 @@ function deferQueuedTodos(state: LoopState): void {
 
 function preserveExternalRunUpdates(state: LoopState, latest: LoopState, activeTodoId: RalphTodo["id"]): void {
   state.runBudget = latest.runBudget;
+  state.workerDefaults = latest.workerDefaults;
   const latestTodosById = new Map(latest.todos.map((todo) => [String(todo.id), todo]));
   for (const todo of state.todos) {
     if (String(todo.id) === String(activeTodoId)) continue;
     const latestTodo = latestTodosById.get(String(todo.id));
-    if (latestTodo) todo.status = latestTodo.status;
+    if (latestTodo) {
+      todo.status = latestTodo.status;
+      todo.workerModel = latestTodo.workerModel;
+      todo.workerProvider = latestTodo.workerProvider;
+      todo.workerContextWindow = latestTodo.workerContextWindow;
+    }
   }
+}
+
+function resolveEffectiveWorker(todo: RalphTodo, state: LoopState, options: RunOptions): { model?: string; provider?: string; contextWindow?: number } {
+  return {
+    model: todo.workerModel ?? state.workerDefaults?.model ?? options.workerModel,
+    provider: todo.workerProvider ?? state.workerDefaults?.provider,
+    contextWindow: todo.workerContextWindow ?? state.workerDefaults?.contextWindow ?? options.workerContextWindow,
+  };
 }
 
 function assertLoopSafeForTodoInsertion(state: LoopState): void {
@@ -349,7 +412,9 @@ export function renderStatus(state: LoopState): string {
     ...state.todos.map((todo, index) => {
       const iteration = latestIterationForTodo(state, todo.id);
       const diff = iteration?.diff ? ` · ${formatDiffStats(iteration.diff)}` : "";
-      return `${index === state.todos.length - 1 ? "└─" : "├─"} ${todoIcon(todo.status)} #${todo.id} ${todo.title}${todo.status === "running" ? " (working)" : ""}${todo.status === "deferred" ? " (deferred)" : ""}${diff}`;
+      const model = durableModelForTodo(state, todo, iteration);
+      const modelText = model ? ` · ${model}` : "";
+      return `${index === state.todos.length - 1 ? "└─" : "├─"} ${todoIcon(todo.status)} #${todo.id} ${todo.title}${todo.status === "running" ? " (working)" : ""}${todo.status === "deferred" ? " (deferred)" : ""}${modelText}${diff}`;
     }),
     "",
     "Chat to pause, resume, kill or steer the orchestrator.",
@@ -378,6 +443,10 @@ function latestIterationForTodo(state: LoopState, todoId: RalphTodo["id"]): Loop
     if (iteration?.todoId === todoId) return iteration;
   }
   return undefined;
+}
+
+function durableModelForTodo(state: LoopState, todo: RalphTodo, iteration: LoopState["iterations"][number] | undefined): string | undefined {
+  return iteration?.observedModel ?? iteration?.configuredModel ?? iteration?.model ?? todo.workerModel ?? state.workerDefaults?.model;
 }
 
 function formatDiffStats(diff: { filesChanged: number; insertions: number; deletions: number }): string {

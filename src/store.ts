@@ -25,7 +25,7 @@ export class RalphStore {
     }
   }
 
-  async createLoop(name: string, todos: string[], branch: string, maxIterations?: number): Promise<LoopState> {
+  async createLoop(name: string, todos: string[], branch: string, maxIterations?: number, workerDefaults?: LoopState["workerDefaults"]): Promise<LoopState> {
     const now = new Date().toISOString();
     const state: LoopState = {
       name: slugifyLoopName(name),
@@ -35,6 +35,7 @@ export class RalphStore {
       createdAt: now,
       updatedAt: now,
       maxIterations,
+      ...(workerDefaults && hasWorkerDefaults(workerDefaults) ? { workerDefaults } : {}),
       todos: todos.map<RalphTodo>((title, index) => ({ id: semanticTodoId(title, index), title, status: initialTodoStatus(index, maxIterations) })),
       iterations: [],
     };
@@ -108,6 +109,10 @@ async function fileExists(filePath: string): Promise<boolean> {
   }
 }
 
+function hasWorkerDefaults(workerDefaults: LoopState["workerDefaults"]): boolean {
+  return Boolean(workerDefaults?.model || workerDefaults?.provider || workerDefaults?.contextWindow);
+}
+
 function initialTodoStatus(index: number, maxIterations: number | undefined): TodoStatus {
   return maxIterations && index >= maxIterations ? "deferred" : "queued";
 }
@@ -126,14 +131,16 @@ function renderPlan(state: LoopState): string {
   const lines = [`# Ralph loop: ${state.name}`, "", `Control: ${state.control}`, "", "## Todo", ""];
   for (const todo of state.todos) {
     const box = todo.status === "complete" ? "x" : " ";
-    lines.push(`- [${box}] ${todo.id}. ${todo.title} (${todo.status})`);
+    const model = todo.workerModel ? ` · model: ${todo.workerModel}` : state.workerDefaults?.model ? ` · model: ${state.workerDefaults.model}` : "";
+    lines.push(`- [${box}] ${todo.id}. ${todo.title} (${todo.status})${model}`);
   }
   lines.push("");
   return lines.join("\n");
 }
 
 function renderHandoffIn(state: LoopState, iteration: IterationState, todo: RalphTodo): string {
-  return `# Ralph handoff-in\n\nLoop: ${state.name}\nIteration: ${iteration.number}\nTodo: ${todo.id}. ${todo.title}\n\n## Task\n\nComplete exactly this todo item. Keep changes bounded and record verification.\n\n## Required output\n\nProduce handoff-out.md and verification.md for this iteration. Include a ## Commit subject section in handoff-out.md with one short single-line commit subject that follows this project's commit style when you can infer it.\n`;
+  const modelLine = iteration.configuredModel ?? iteration.model ? `\nWorker model: ${iteration.configuredModel ?? iteration.model}\n` : "";
+  return `# Ralph handoff-in\n\nLoop: ${state.name}\nIteration: ${iteration.number}\nTodo: ${todo.id}. ${todo.title}${modelLine}\n## Task\n\nComplete exactly this todo item. Keep changes bounded and record verification.\n\n## Required output\n\nProduce handoff-out.md and verification.md for this iteration. Include a ## Commit subject section in handoff-out.md with one short single-line commit subject that follows this project's commit style when you can infer it.\n`;
 }
 
 function renderHandoffOut(iteration: IterationState, result: { summary: string; changedFiles: string[]; commitSubject?: string }): string {
@@ -199,6 +206,12 @@ const WorkerUsageSchema = Type.Object({
   contextWindow: Type.Optional(Type.Number()),
 }, { additionalProperties: false });
 
+const WorkerModelAssignmentSchema = Type.Object({
+  model: Type.Optional(Type.String()),
+  provider: Type.Optional(Type.String()),
+  contextWindow: Type.Optional(Type.Number()),
+}, { additionalProperties: false });
+
 const IterationStateSchema = Type.Object({
   number: Type.Number(),
   status: Type.Union([
@@ -216,6 +229,10 @@ const IterationStateSchema = Type.Object({
   workerBranch: Type.Optional(Type.String()),
   model: Type.Optional(Type.String()),
   provider: Type.Optional(Type.String()),
+  configuredModel: Type.Optional(Type.String()),
+  configuredProvider: Type.Optional(Type.String()),
+  observedModel: Type.Optional(Type.String()),
+  observedProvider: Type.Optional(Type.String()),
   startedAt: Type.String(),
   completedAt: Type.Optional(Type.String()),
   verification: Type.Optional(VerificationRecordSchema),
@@ -237,6 +254,9 @@ const RalphTodoSchema = Type.Object({
     Type.Literal("failed"),
     Type.Literal("interrupted"),
   ]),
+  workerModel: Type.Optional(Type.String()),
+  workerProvider: Type.Optional(Type.String()),
+  workerContextWindow: Type.Optional(Type.Number()),
 }, { additionalProperties: false });
 
 const RunBudgetSchema = Type.Object({
@@ -254,6 +274,7 @@ const LoopStateSchema = Type.Object({
   updatedAt: Type.String(),
   maxIterations: Type.Optional(Type.Number()),
   runBudget: Type.Optional(RunBudgetSchema),
+  workerDefaults: Type.Optional(WorkerModelAssignmentSchema),
   todos: Type.Array(RalphTodoSchema),
   iterations: Type.Array(IterationStateSchema),
 }, { additionalProperties: false });

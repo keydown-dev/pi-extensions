@@ -23,6 +23,7 @@ export class PiJsonWorkerRunner {
     await output.recordExit(exitCode, stderr);
     tracker.mark("exited", "worker_exit");
     const usage = nonEmptyUsage(tracker.getUsage());
+    const observed = tracker.getObservedModel();
 
     if (exitCode !== 0) {
       return {
@@ -34,6 +35,7 @@ export class PiJsonWorkerRunner {
           notes: killed ? "Worker was killed by ralph-kill. Partial edits may remain; inspect git status before resuming." : undefined,
         },
         usage,
+        ...observed,
       };
     }
 
@@ -48,6 +50,7 @@ export class PiJsonWorkerRunner {
           notes: "Fresh worker must produce handoff-out.md before the orchestrator can accept the iteration.",
         },
         usage,
+        ...observed,
       };
     }
 
@@ -58,6 +61,7 @@ export class PiJsonWorkerRunner {
       verification: parseVerification(verificationText),
       commitSubject: extractCommitSubjectFromHandoff(handoffText),
       usage,
+      ...observed,
     };
   }
 
@@ -229,6 +233,13 @@ class WorkerProgressTracker {
   getUsage(): WorkerUsage {
     const contextTokens = this.progress.latestUsage?.totalTokens;
     return { ...this.progress.usage, ...(contextTokens ? { contextTokens } : {}) };
+  }
+
+  getObservedModel(): { model?: string; provider?: string } {
+    return {
+      ...(this.progress.model ? { model: this.progress.model } : {}),
+      ...(this.progress.provider ? { provider: this.progress.provider } : {}),
+    };
   }
 
   record(event: unknown): void {

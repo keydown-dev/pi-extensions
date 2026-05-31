@@ -747,6 +747,143 @@ test("parseLoopStateJson validates persisted state", () => {
   }), "bad-state.json"), /bad-state\.json\.todos\[0\]\.status/);
 });
 
+test("worker model assignments persist and resolve by precedence", async (t) => {
+  const cwd = await createMathFixture();
+  t.after(() => fs.rm(cwd, { recursive: true, force: true }));
+  const ralph = new RalphOrchestrator(cwd);
+  let state = await ralph.start({ name: "model-assignment-demo", todos: ["Add subtract test and implementation", "Add multiply test and implementation"], defaultWorkerModel: "loop/default", defaultWorkerContextWindow: 1234 });
+  assert.equal(state.workerDefaults?.model, "loop/default");
+
+  const assigned = await ralph.assignTodoModel({ name: state.name, todoId: "001-add-subtract-test-and-implementation", model: "todo/override", contextWindow: 5678 });
+  assert.equal(assigned.todo.workerModel, "todo/override");
+
+  state = await ralph.run(state.name, { maxIterations: 2, workerMode: "scripted", workerModel: "run/fallback" });
+
+  assert.equal(state.iterations[0]?.configuredModel, "todo/override");
+  assert.equal(state.iterations[0]?.model, "todo/override");
+  assert.equal(state.iterations[1]?.configuredModel, "loop/default");
+  assert.equal(state.iterations[1]?.model, "loop/default");
+  assert.match(renderStatus(state), /todo\/override|loop\/default/);
+});
+
+test("assignTodoModel refuses running todo but allows future todo during a run", async (t) => {
+  const cwd = await createMathFixture();
+  t.after(() => fs.rm(cwd, { recursive: true, force: true }));
+  const ralph = new RalphOrchestrator(cwd);
+  await ralph.start({ name: "model-running-demo", todos: ["Add subtract test and implementation", "Add multiply test and implementation"] });
+  let assignedFuture: Promise<unknown> | undefined;
+  let refusedRunning: Promise<unknown> | undefined;
+
+  const state = await ralph.run("model-running-demo", {
+    maxIterations: 2,
+    workerMode: "scripted",
+    onProgress(progress) {
+      if (!assignedFuture && progress.state.todos[0]?.status === "running") {
+        refusedRunning = ralph.assignTodoModel({ name: "model-running-demo", todoId: "001-add-subtract-test-and-implementation", model: "too-late/model" }).catch((error) => error);
+        assignedFuture = ralph.assignTodoModel({ name: "model-running-demo", todoId: "002-add-multiply-test-and-implementation", model: "future/model" });
+      }
+    },
+  });
+
+  assert.ok(refusedRunning);
+  const refusal = await refusedRunning;
+  assert.match(String(refusal), /running todo/);
+  assert.ok(assignedFuture);
+  const assigned = await assignedFuture as Awaited<ReturnType<RalphOrchestrator["assignTodoModel"]>>;
+  assert.equal(assigned.todo.workerModel, "future/model");
+  assert.equal(state.iterations[1]?.configuredModel, "future/model");
+});
+
+test("pi-json worker persists observed model and provider", async (t) => {
+  const cwd = await createMathFixture();
+  t.after(() => fs.rm(cwd, { recursive: true, force: true }));
+  const binDir = await fs.mkdtemp(path.join(os.tmpdir(), "ralph-fake-pi-"));
+  t.after(() => fs.rm(binDir, { recursive: true, force: true }));
+  const originalPath = process.env.PATH;
+  process.env.PATH = `${binDir}${path.delimiter}${originalPath ?? ""}`;
+  t.after(() => {
+    process.env.PATH = originalPath;
+  });
+  await fs.writeFile(path.join(binDir, "pi"), `#!/usr/bin/env node
+import fs from "node:fs";
+import path from "node:path";
+const prompt = process.argv[process.argv.length - 1] ?? "";
+const outputs = [...prompt.matchAll(/- (\\S+\\.md)/g)].map((match) => match[1]);
+const handoffOut = outputs.find((file) => file.endsWith("handoff-out.md"));
+const verification = outputs.find((file) => file.endsWith("verification.md"));
+fs.appendFileSync(path.join(process.cwd(), "src", "math.js"), "\\nexport const observedModelTouched = true;\\n");
+fs.writeFileSync(handoffOut, "# Ralph handoff-out\\n\\n## Summary\\n\\nTouched math module.\\n\\n## Changed files\\n\\n- src/math.js\\n\\n## Commit subject\\n\\nfeat: persist observed model\\n");
+fs.writeFileSync(verification, "# Verification\\n\\nStatus: passed\\n");
+console.log(JSON.stringify({ type: "message_end", message: { role: "assistant", model: "observed-model", provider: "observed-provider", usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2 } } }));
+`, { mode: 0o755 });
+
+  const ralph = new RalphOrchestrator(cwd);
+  await ralph.start({ name: "observed-model-demo", todos: ["Touch math module"] });
+  const state = await ralph.run("observed-model-demo", { maxIterations: 1, workerModel: "configured/model" });
+
+  assert.equal(state.iterations[0]?.configuredModel, "configured/model");
+  assert.equal(state.iterations[0]?.observedModel, "observed-model");
+  assert.equal(state.iterations[0]?.observedProvider, "observed-provider");
+  assert.equal(state.iterations[0]?.model, "observed-model");
+});
+
+test("schema accepts persisted worker model fields", () => {
+  const state = parseLoopStateJson(JSON.stringify({
+    name: "model-schema-demo",
+    control: "active",
+    branch: "orchestrator/model-schema-demo",
+    currentIteration: 1,
+    createdAt: "2026-05-27T00:00:00.000Z",
+    updatedAt: "2026-05-27T00:00:00.000Z",
+    workerDefaults: { model: "loop/default", contextWindow: 1000 },
+    todos: [{ id: "001-do-work", title: "Do work", status: "complete", workerModel: "todo/model", workerContextWindow: 2000 }],
+    iterations: [{
+      number: 1,
+      status: "accepted",
+      todoId: "001-do-work",
+      beforeRef: "before",
+      startedAt: "2026-05-27T00:00:00.000Z",
+      configuredModel: "todo/model",
+      observedModel: "actual/model",
+      observedProvider: "actual-provider",
+    }],
+  }));
+
+  assert.equal(state.workerDefaults?.model, "loop/default");
+  assert.equal(state.todos[0]?.workerModel, "todo/model");
+  assert.equal(state.iterations[0]?.observedModel, "actual/model");
+});
+
+test("Ralph widget displays durable todo default and completed model", () => {
+  const state = parseLoopStateJson(JSON.stringify({
+    name: "widget-model-demo",
+    control: "active",
+    branch: "orchestrator/widget-model-demo",
+    currentIteration: 1,
+    createdAt: "2026-05-27T00:00:00.000Z",
+    updatedAt: "2026-05-27T00:00:00.000Z",
+    workerDefaults: { model: "provider/default-model" },
+    todos: [
+      { id: 1, title: "Done", status: "complete" },
+      { id: 2, title: "Next", status: "queued", workerModel: "provider/todo-model" },
+    ],
+    iterations: [{
+      number: 1,
+      status: "accepted",
+      todoId: 1,
+      beforeRef: "before",
+      startedAt: "2026-05-27T00:00:00.000Z",
+      completedAt: "2026-05-27T00:00:01.000Z",
+      configuredModel: "provider/configured-model",
+      observedModel: "provider/observed-model",
+    }],
+  }));
+
+  const output = renderRalphWidget(state, undefined, plainTheme as never, 140, "expanded").join("\n");
+  assert.match(output, /observed-model/);
+  assert.match(output, /todo-model/);
+});
+
 test("changedPaths preserves leading-space porcelain paths", async (t) => {
   const cwd = await createMathFixture();
   t.after(() => fs.rm(cwd, { recursive: true, force: true }));

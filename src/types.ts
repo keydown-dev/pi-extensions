@@ -5,10 +5,19 @@ export type TodoStatus = "queued" | "running" | "complete" | "deferred" | "faile
 
 export type RalphTodoId = string | number;
 
+export interface WorkerModelAssignment {
+  model?: string;
+  provider?: string;
+  contextWindow?: number;
+}
+
 export interface RalphTodo {
   id: RalphTodoId;
   title: string;
   status: TodoStatus;
+  workerModel?: string;
+  workerProvider?: string;
+  workerContextWindow?: number;
 }
 
 export type InsertTodoStatus = "queued" | "deferred";
@@ -19,7 +28,26 @@ export interface InsertTodoOptions {
   title: string;
   insertAtIndex?: number;
   status?: InsertTodoStatus;
+  workerModel?: string;
+  workerProvider?: string;
+  workerContextWindow?: number;
   dryRun?: boolean;
+}
+
+export interface AssignTodoModelOptions {
+  name: string;
+  todoId: string;
+  model?: string | null;
+  provider?: string | null;
+  contextWindow?: number | null;
+  dryRun?: boolean;
+}
+
+export interface AssignTodoModelResult {
+  state: LoopState;
+  todo: RalphTodo;
+  dryRun: boolean;
+  cleared: boolean;
 }
 
 export interface InsertTodoResult {
@@ -55,6 +83,10 @@ export interface IterationState {
   workerBranch?: string;
   model?: string;
   provider?: string;
+  configuredModel?: string;
+  configuredProvider?: string;
+  observedModel?: string;
+  observedProvider?: string;
   startedAt: string;
   completedAt?: string;
   verification?: VerificationRecord;
@@ -80,6 +112,7 @@ export interface LoopState {
   updatedAt: string;
   maxIterations?: number;
   runBudget?: RunBudget;
+  workerDefaults?: WorkerModelAssignment;
   todos: RalphTodo[];
   iterations: IterationState[];
 }
@@ -88,6 +121,9 @@ export interface StartOptions {
   name: string;
   todos?: string[];
   maxIterations?: number;
+  defaultWorkerModel?: string;
+  defaultWorkerProvider?: string;
+  defaultWorkerContextWindow?: number;
 }
 
 export type WorkerMode = "scripted" | "pi-json";
@@ -158,4 +194,6 @@ export interface WorkerResult {
   verification: VerificationRecord;
   commitSubject?: string;
   usage?: WorkerUsage;
+  model?: string;
+  provider?: string;
 }

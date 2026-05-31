@@ -29,7 +29,8 @@ Useful things to clarify:
 - Which planning/interview style should be used?
   - Examples: `grill-me`, `grill-with-docs`, a custom local skill, a team planning template, no special skill.
 - Which model should worker subagents use?
-  - Examples: same as the orchestrator, a cheaper fast model, a stronger model with higher thinking, any configured Pi model pattern such as `sonnet:high` or `openai/gpt-4o`.
+  - Examples: same as the orchestrator, one loop-wide default model, per-todo model assignments, decide later before each run, a cheaper fast model, a stronger model with higher thinking, any configured Pi model pattern such as `sonnet:high` or `openai/gpt-4o`.
+  - If a model-listing tool is available, query it before asking the user to choose. If a requested model is not configured or cannot be resolved, stop and ask the user for a valid model string or approval to use the current/default model.
 - Which skills should worker subagents invoke?
   - Examples: TDD, DDD, architecture review, writing continuity, research, issue triage, codebase-specific skills.
 - Which files should workers read before starting?
@@ -55,7 +56,9 @@ Put this in the Ralph loop packet and worker handoffs:
 - forbidden/out-of-scope work for this loop
 - per-iteration definition of done
 - verification required for this loop
-- worker model to use, if different from the orchestrator model
+- default worker model to use, if different from the orchestrator model
+- per-todo worker model overrides, if any
+- model precedence: todo override → loop default → run-level fallback → current/default Pi model
 - worker skills to invoke and when
 - reference files each worker should inspect
 - reporting/handoff requirements
@@ -107,7 +110,7 @@ Potential locations:
 Ask one at a time. Include your recommended answer when useful.
 
 - "Which planning style or skill should I use to shape this loop? My recommendation: use your project-specific planning skill if you have one; otherwise use a lightweight grill-style interview."
-- "Which model should worker subagents use? My recommendation: default to the current Pi model unless you want a cheaper/faster or stronger model for workers."
+- "Which model should worker subagents use? My recommendation: default to the current Pi model unless you want one loop-wide model, per-todo assignments, or a cheaper/faster/stronger model for specific workers."
 - "Which skills should worker subagents invoke during execution? My recommendation: list only skills that change worker behavior, not every available skill."
 - "Which files are mandatory context for workers? My recommendation: keep this short and durable — context docs, ADRs, issue lists, style guides, or continuity notes."
 - "What verification proves an iteration is done? My recommendation: include both machine checks and any human-review criteria."
@@ -129,7 +132,9 @@ When ready, present:
 - Notes:
 
 ## Worker Process
-- Worker model, if different from the orchestrator:
+- Default worker model:
+- Per-todo model overrides:
+- Model selection notes:
 - Skills workers should invoke:
 - Required reference files:
 - Required workflow/standards:
@@ -141,7 +146,7 @@ When ready, present:
 - Stop/ask-user conditions:
 
 ## Worker Todos / Issues
-- [ ] ...
+- [ ] ... — model: default/current
 
 ## Definition of Done
 

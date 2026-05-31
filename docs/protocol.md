@@ -83,15 +83,20 @@ The `pi-json` runner accepts these environment options:
 
 ## Persisted state model
 
-Loop state stores control only:
+Loop state stores control, optional run budget, and optional worker defaults:
 
 ```ts
 loop.control: "active" | "paused"
+loop.workerDefaults?: { model?: string; provider?: string; contextWindow?: number }
 ```
 
-Task state stores work lifecycle:
+Task state stores work lifecycle and optional per-todo worker model assignment:
 
 ```ts
+task.workerModel?: string
+task.workerProvider?: string
+task.workerContextWindow?: number
+
 task.status:
   | "queued"
   | "running"
@@ -109,6 +114,19 @@ Meanings:
 - `deferred`: intentionally outside the current run scope/limit.
 - `failed`: attempted and failed verification or needs a decision.
 - `interrupted`: a running worker was killed/aborted with partial work likely present.
+
+Iteration state stores the effective configured model before launch and observed model/provider after worker output reports them:
+
+```ts
+iteration.configuredModel?: string
+iteration.configuredProvider?: string
+iteration.observedModel?: string
+iteration.observedProvider?: string
+iteration.model?: string // display/back-compat alias
+iteration.provider?: string // observed provider alias
+```
+
+Worker model precedence is todo override → loop default → run-level fallback → current/default Pi model. The active running todo's launch model is immutable; model assignment tools may update future queued/deferred work but must refuse the currently running todo.
 
 Loop display status is derived from control and task statuses:
 
@@ -155,7 +173,9 @@ Worker responsibilities:
 
 ## Todo insertion
 
-`ralph_orchestrator_insert_todo` inserts a new task after an existing stable todo ID. Existing todo IDs and completed iteration `todoId` references are preserved; execution order follows the persisted todo array order. The inserted todo defaults to `deferred`, uses the caller-provided semantic ID, and increments `maxIterations` when that field is present. The tool refuses to modify loops with running todos or iterations and supports `dryRun: true` for a before/after preview.
+`ralph_orchestrator_insert_todo` inserts a new task after an existing stable todo ID. Existing todo IDs and completed iteration `todoId` references are preserved; execution order follows the persisted todo array order. The inserted todo defaults to `deferred`, uses the caller-provided semantic ID, can include a per-todo `model`, and increments `maxIterations` when that field is present. The tool refuses to modify loops with running todos or iterations and supports `dryRun: true` for a before/after preview.
+
+`ralph_orchestrator_assign_todo_model` updates or clears a persisted model override for a future todo. It refuses a `running` todo so callers do not imply that an already-started child worker changed models.
 
 ## Run-limit behavior
 

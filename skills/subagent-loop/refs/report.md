@@ -1,11 +1,6 @@
----
-name: ralph-report
-description: Produce structured Ralph worker reports for the orchestrator, including verification evidence and next-step handoff context.
----
+# Subagent Loop Report
 
-# Ralph Report
-
-At the end of a Ralph worker iteration, report in durable files rather than relying on chat history.
+At the end of a subagent worker iteration, report in durable files rather than relying on chat history.
 
 `handoff-out.md` must include:
 

@@ -1,9 +1,4 @@
----
-name: ralph-brief
-description: Create concise Ralph iteration input handoffs for fresh-context workers. Use when preparing the next bounded task in a Ralph orchestrator loop.
----
-
-# Ralph Brief
+# Subagent Loop Brief
 
 Create a durable `handoff-in.md` for exactly one bounded iteration.
 

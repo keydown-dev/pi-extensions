@@ -1,8 +1,8 @@
-# pi-ralph-orchestrator
+# Subagent Loop - fresh-context worker loops
 
-A fresh-context, Ralph-style orchestrator for Pi.
+This package provides the **Subagent Loop** capability for Pi. It keeps the historical package name and legacy `.ralph/orchestrator/` artifact directory for compatibility, but the public command and tool surface is `/loop-*` and `subagent_loop_*`.
 
-This package provides a `/ralph` command namespace, local loop artifacts under `.ralph/orchestrator/`, orchestration branches, before/after git refs for each iteration, fresh `pi --mode json` workers, and a deterministic scripted worker for tests.
+Subagent Loop creates local loop artifacts, orchestration branches, before/after git refs for each iteration, fresh `pi --mode json` workers, and a deterministic scripted worker for tests.
 
 ## Install
 
@@ -36,15 +36,16 @@ This package is not published to npm yet, so use the Git or local-path installat
 
 | Command | Purpose |
 | --- | --- |
-| `/ralph-plan <goal>` | Start a planning interview using the bundled `ralph-plan` skill. |
-| `/ralph-start <name> [--max N] [--model MODEL] [--todo item ...]` | Prepare a new loop. Tasks beyond `--max N` are marked `deferred`; `--model` sets the persisted loop default worker model. |
-| `/ralph-run [name] [--max N] [--runner pi-json\|scripted] [--model MODEL]` | Run queued work in the background. If paused, this resumes the loop. If already running, this queues `N` more persisted run-budget iterations instead of starting a second worker. |
-| `/ralph-pause [name]` | Soft pause. A running worker may finish, but Ralph will not pick another queued task. |
-| `/ralph-kill [name]` | Hard abort active child worker processes, pause the loop, then require inspection before running again. |
-| `/ralph-status [name]` | Show loop control, derived status, iteration count, branch, and task progress. |
-| `/ralph-list` | List all loops under `.ralph/orchestrator/loops/`. |
+| `/loop-plan <goal>` | Start a planning interview using the bundled `subagent-loop` skill. |
+| `/loop-start <name> [--max N] [--model MODEL] [--todo item ...]` | Prepare a new loop. Tasks beyond `--max N` are marked `deferred`; `--model` sets the persisted loop default worker model. |
+| `/loop-run [name] [--max N] [--runner pi-json\|scripted] [--model MODEL]` | Run queued work in the background. If paused, this resumes the loop. If already running, this queues `N` more persisted run-budget iterations instead of starting a second worker. |
+| `/loop-pause [name]` | Soft pause. A running worker may finish, but the loop will not pick another queued task. |
+| `/loop-kill [name]` | Hard abort active child worker processes, pause the loop, then require inspection before running again. |
+| `/loop-status [name]` | Show loop control, derived status, iteration count, branch, and task progress. |
+| `/loop-list` | List all loops under `.ralph/orchestrator/loops/`. |
+| `/loop-widget [toggle\|compact\|expand\|show\|hide]` | Set Subagent Loop widget mode. |
 
-There are no stop/resume/next/control aliases. Resume by running again with `/ralph-run`; run one task with `/ralph-run --max 1`.
+Resume by running again with `/loop-run`; run one task with `/loop-run --max 1`.
 
 Runner modes:
 
@@ -55,21 +56,21 @@ Runner modes:
 
 Agent tools:
 
-- `ralph_orchestrator_plan`
-- `ralph_orchestrator_start`
-- `ralph_orchestrator_run`
-- `ralph_orchestrator_insert_todo`
-- `ralph_orchestrator_assign_todo_model`
-- `ralph_orchestrator_pause`
-- `ralph_orchestrator_kill`
-- `ralph_orchestrator_status`
-- `ralph_orchestrator_list`
+- `subagent_loop_plan`
+- `subagent_loop_start`
+- `subagent_loop_run`
+- `subagent_loop_insert_todo`
+- `subagent_loop_assign_todo_model`
+- `subagent_loop_pause`
+- `subagent_loop_kill`
+- `subagent_loop_status`
+- `subagent_loop_list`
 
-The run tool/command returns immediately after starting background orchestration, so the parent/orchestrator chat remains available while the Ralph widget streams progress. Calling it again while the same loop is running adds to `runBudget.remaining`; the active loop picks up that persisted budget after the current worker exits. Widget hint: `Chat to pause, resume, kill or steer the orchestrator.`
+The run tool/command returns immediately after starting background orchestration, so the parent/orchestrator chat remains available while the Subagent Loop widget streams progress. Calling it again while the same loop is running adds to `runBudget.remaining`; the active loop picks up that persisted budget after the current worker exits.
 
-`ralph_orchestrator_insert_todo` safely inserts a new todo after a stable `afterTodoId` without renumbering existing todos or completed iteration references. Todo IDs are semantic identity, not list positions; execution order follows the persisted todo array. The insert tool refuses to run while any todo/iteration is `running`, defaults the inserted todo to `deferred`, requires a caller-provided semantic ID such as `ISSUE-005.1`, increments `maxIterations` when present, updates both `state.json` and `plan.md`, can include a per-todo `model`, and supports `dryRun: true` for preview.
+`subagent_loop_insert_todo` safely inserts a new todo at a stable `insertAtIndex` without renumbering existing todos or completed iteration references. Todo IDs are semantic identity, not list positions; execution order follows the persisted todo array. The insert tool refuses to run while any todo/iteration is `running`, defaults the inserted todo to `deferred`, requires a caller-provided semantic ID such as `ISSUE-005.1`, increments `maxIterations` when present, updates both `state.json` and `plan.md`, can include a per-todo `model`, and supports `dryRun: true` for preview.
 
-Worker model precedence is: todo override (`todo.workerModel`) → loop default (`loop.workerDefaults.model`) → run-level fallback (`/ralph-run --model` or tool `model`) → current/default Pi model. Ralph persists the effective configured model on the iteration before launching the child worker and records observed model/provider when the worker reports them. `ralph_orchestrator_assign_todo_model` can update or clear queued/deferred future todo overrides, but refuses the currently running todo so an active child worker's launch model cannot change mid-flight.
+Worker model precedence is: todo override (`todo.workerModel`) → loop default (`loop.workerDefaults.model`) → run-level fallback (`/loop-run --model` or tool `model`) → current/default Pi model. The loop persists the effective configured model on the iteration before launching the child worker and records observed model/provider when the worker reports them. `subagent_loop_assign_todo_model` can update or clear queued/deferred future todo overrides, but refuses the currently running todo so an active child worker's launch model cannot change mid-flight.
 
 ## State model
 
@@ -101,8 +102,8 @@ Display status is derived:
 ## Control semantics
 
 - **Pause**: set loop control to `paused`, clear the active run budget, and defer queued work. If a worker is already running, let it finish the current task, then do not start another task.
-- **Resume**: there is no resume command. Running again (`/ralph-run`) sets control to `active` and picks queued work.
-- **Kill**: send `SIGTERM` to active child `pi --mode json` workers. The loop is paused. If non-Ralph worktree changes are detected, the running task becomes `interrupted`; otherwise it can return to `queued`. Inspect Ralph status and `git status` before running again.
+- **Resume**: there is no resume command. Running again (`/loop-run`) sets control to `active` and picks queued work.
+- **Kill**: send `SIGTERM` to active child `pi --mode json` workers. The loop is paused. If non-loop worktree changes are detected, the running task becomes `interrupted`; otherwise it can return to `queued`. Inspect loop status and `git status` before running again.
 
 ## Artifacts, identity, and git policy
 
@@ -110,9 +111,13 @@ Starting a loop requires a clean worktree, creates/checks out `orchestrator/<loo
 
 Todo IDs are stable semantic identity (`001-document-protocol`, `ISSUE-005.1`); physical iteration numbers, directories, and refs remain numeric and chronological. The orchestrator records before/after refs and captures code diff stats for completed work, excluding local `.ralph/` artifacts from displayed line counts.
 
-Ralph artifacts live under `.ralph/orchestrator/`. This repo ignores `.ralph/` so loop state, handoffs, and worker transcripts stay local unless a project explicitly chooses to track them. When `.ralph/` is tracked, `worker-output.jsonl` is the compact committed worker event summary. Raw diagnostic traces such as `worker-output.raw.jsonl` are local-only, ignored by Ralph-managed `.ralph/.gitignore`, and unstaged before commits. Enable raw traces for debugging with `RALPH_WORKER_RAW_OUTPUT=1` (`true` and `yes` also work).
+Loop artifacts currently live under the legacy `.ralph/orchestrator/` directory. This repo ignores `.ralph/` so loop state, handoffs, and worker transcripts stay local unless a project explicitly chooses to track them. When `.ralph/` is tracked, `worker-output.jsonl` is the compact committed worker event summary. Raw diagnostic traces such as `worker-output.raw.jsonl` are local-only, ignored by managed `.ralph/.gitignore`, and unstaged before commits. Enable raw traces for debugging with `RALPH_WORKER_RAW_OUTPUT=1` (`true` and `yes` also work).
 
 See `docs/protocol.md` for the full state, artifact, commit, worker-output, and schema compatibility protocol.
+
+## Migration note
+
+Ralph was the previous public name. Use `/loop-*` commands and `subagent_loop_*` tools going forward. The package name, some internal class names, git refs, and the `.ralph/` artifact path remain for compatibility.
 
 ## Test
 

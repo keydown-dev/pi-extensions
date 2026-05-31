@@ -1,25 +1,25 @@
-# Ralph Orchestrator Protocol
+# Subagent Loop Protocol
 
 ## Roles
 
 - Orchestrator extension: owns state, git policy, artifacts, commands, worker process tracking, and widget status.
-- Brief skill: prepares concise `handoff-in.md` files.
-- Pickup skill: guides fresh workers through one bounded task.
-- Report skill: guides workers to produce durable output artifacts.
+- Brief workflow: prepares concise `handoff-in.md` files.
+- Pickup workflow: guides fresh workers through one bounded task.
+- Report workflow: guides workers to produce durable output artifacts.
 
 ## Todo identity and execution order
 
-Ralph todo IDs are stable semantic identifiers, not list positions. Newly created loops derive IDs from the todo title and original creation index, for example `001-document-protocol` or issue-like IDs such as `ISSUE-005.1`. Inserted todos must provide an explicit semantic ID.
+Todo IDs are stable semantic identifiers, not list positions. Newly created loops derive IDs from the todo title and original creation index, for example `001-document-protocol` or issue-like IDs such as `ISSUE-005.1`. Inserted todos must provide an explicit semantic ID.
 
-The persisted `todos` array controls execution order. Ralph selects queued work by walking that array; inserting a todo changes array order without renumbering existing todo IDs or completed iteration references. Treat `todo.id` as durable identity and array position as mutable scheduling order.
+The persisted `todos` array controls execution order. The loop selects queued work by walking that array; inserting a todo changes array order without renumbering existing todo IDs or completed iteration references. Treat `todo.id` as durable identity and array position as mutable scheduling order.
 
 Physical iteration numbers remain numeric and chronological. Iteration directories, refs, and display counters use padded numbers such as `iterations/005/`, `iter-005-before`, and `iter-005-after`. `iteration.todoId` links a numeric execution attempt back to the semantic todo it executed.
 
 ## Artifact root
 
-Loop artifacts live under `.ralph/orchestrator/loops/<loop>/`. Projects usually ignore `.ralph/` so local loop state, handoffs, and worker transcripts stay local by default. If a project chooses to track `.ralph/`, Ralph still treats raw diagnostic traces as local-only ignored files.
+Loop artifacts live under the legacy `.ralph/orchestrator/loops/<loop>/` directory. Projects usually ignore `.ralph/` so local loop state, handoffs, and worker transcripts stay local by default. If a project chooses to track `.ralph/`, raw diagnostic traces remain local-only ignored files.
 
-Ralph also creates or updates `.ralph/.gitignore` with Ralph-managed diagnostic rules:
+The extension creates or updates `.ralph/.gitignore` with managed diagnostic rules:
 
 ```gitignore
 # Ralph-managed local diagnostics
@@ -43,7 +43,7 @@ The generator is idempotent and preserves custom rules already present in `.ralp
 Optional local-only diagnostics:
 
 - `worker-output.raw.jsonl`: raw `pi --mode json` stdout trace when raw output is enabled.
-- `worker-output.raw.jsonl.*` / `*.raw.jsonl*`: rotated or ad-hoc raw traces; ignored by Ralph-managed gitignore rules and unstaged before commits.
+- `worker-output.raw.jsonl.*` / `*.raw.jsonl*`: rotated or ad-hoc raw traces; ignored by managed gitignore rules and unstaged before commits.
 
 `worker-output.jsonl` is intentionally compact and durable. It records worker start/process metadata, assistant message summaries, tool calls/results, usage snapshots, warnings for malformed lines, worker exit, and the final `worker_result`. Large values are truncated so repository history remains readable.
 
@@ -61,7 +61,7 @@ Commit subject rules:
 
 - `handoff: ISSUE-005.1 context` for semantic todo `ISSUE-005.1`.
 - `worker: ISSUE-005.1 changes` when no valid worker subject is provided.
-- A worker subject must be a single non-empty line after trimming and whitespace normalization, no longer than 120 characters, for example `feat: document Ralph artifact protocol`.
+- A worker subject must be a single non-empty line after trimming and whitespace normalization, no longer than 120 characters, for example `feat: document loop artifact protocol`.
 - Legacy states without a usable todo ID fall back to `iteration 006` in commit messages.
 
 ## Git refs
@@ -69,7 +69,7 @@ Commit subject rules:
 - `refs/ralph/<loop>/iter-001-before`
 - `refs/ralph/<loop>/iter-001-after`
 
-Refs stay numeric because they identify physical chronological attempts, not semantic todo identity.
+Refs keep the historical namespace and stay numeric because they identify physical chronological attempts, not semantic todo identity.
 
 ## Runner boundary
 
@@ -104,26 +104,6 @@ task.status:
   | "deferred"
   | "failed"
   | "interrupted"
-```
-
-Meanings:
-
-- `queued`: eligible for the current/next run.
-- `running`: currently assigned to an active worker.
-- `complete`: finished and accepted.
-- `deferred`: intentionally outside the current run scope/limit.
-- `failed`: attempted and failed verification or needs a decision.
-- `interrupted`: a running worker was killed/aborted with partial work likely present.
-
-Iteration state stores the effective configured model before launch and observed model/provider after worker output reports them:
-
-```ts
-iteration.configuredModel?: string
-iteration.configuredProvider?: string
-iteration.observedModel?: string
-iteration.observedProvider?: string
-iteration.model?: string // display/back-compat alias
-iteration.provider?: string // observed provider alias
 ```
 
 Worker model precedence is todo override → loop default → run-level fallback → current/default Pi model. The active running todo's launch model is immutable; model assignment tools may update future queued/deferred work but must refuse the currently running todo.
@@ -173,24 +153,24 @@ Worker responsibilities:
 
 ## Todo insertion
 
-`ralph_orchestrator_insert_todo` inserts a new task after an existing stable todo ID. Existing todo IDs and completed iteration `todoId` references are preserved; execution order follows the persisted todo array order. The inserted todo defaults to `deferred`, uses the caller-provided semantic ID, can include a per-todo `model`, and increments `maxIterations` when that field is present. The tool refuses to modify loops with running todos or iterations and supports `dryRun: true` for a before/after preview.
+`subagent_loop_insert_todo` inserts a new task at an explicit array position. Existing todo IDs and completed iteration `todoId` references are preserved; execution order follows the persisted todo array order. The inserted todo defaults to `deferred`, uses the caller-provided semantic ID, can include a per-todo `model`, and increments `maxIterations` when that field is present. The tool refuses to modify loops with running todos or iterations and supports `dryRun: true` for a before/after preview.
 
-`ralph_orchestrator_assign_todo_model` updates or clears a persisted model override for a future todo. It refuses a `running` todo so callers do not imply that an already-started child worker changed models.
+`subagent_loop_assign_todo_model` updates or clears a persisted model override for a future todo. It refuses a `running` todo so callers do not imply that an already-started child worker changed models.
 
 ## Run-limit behavior
 
-`/ralph-start --max N` creates the first `N` tasks as `queued` and the rest as `deferred`.
+`/loop-start --max N` creates the first `N` tasks as `queued` and the rest as `deferred`.
 
-`/ralph-run --max N` sets control to `active`, persists `runBudget.remaining = N`, scopes the current run to at most `N` queued tasks, and can promote deferred tasks into that scope when no queued work remains. Ralph only picks `queued` tasks.
+`/loop-run --max N` sets control to `active`, persists `runBudget.remaining = N`, scopes the current run to at most `N` queued tasks, and can promote deferred tasks into that scope when no queued work remains. The loop only picks `queued` tasks.
 
-If the loop is already running in the background, another `/ralph-run --max N` or `ralph_orchestrator_run({ maxIterations: N })` does not start a second worker. It adds `N` to the persisted run budget, promotes deferred work if needed, and the active orchestrator consults that budget after the current worker exits.
+If the loop is already running in the background, another `/loop-run --max N` or `subagent_loop_run({ maxIterations: N })` does not start a second worker. It adds `N` to the persisted run budget, promotes deferred work if needed, and the active orchestrator consults that budget after the current worker exits.
 
-Use `/ralph-run --max 1` for a single worker iteration. There is no `/ralph-next` command.
+Use `/loop-run --max 1` for a single worker iteration. There is no `/loop-next` command.
 
 ## Control semantics
 
 - **Pause** is soft: set control to `paused`, clear the active run budget, and defer queued work. If a worker is already running, it is allowed to finish the active iteration, and the orchestrator does not start another iteration.
-- **Resume** is not a command. Running again with `/ralph-run` sets control to `active` and starts fresh worker iterations for queued work.
-- **Kill** is hard: send `SIGTERM` to active Ralph child worker processes for that loop and set control to `paused`. If non-Ralph worktree changes are detected, the active task becomes `interrupted`; otherwise it may return to `queued`. The killed child session cannot be resumed in-place. Inspect Ralph status and `git status` before running again.
+- **Resume** is not a command. Running again with `/loop-run` sets control to `active` and starts fresh worker iterations for queued work.
+- **Kill** is hard: send `SIGTERM` to active child worker processes for that loop and set control to `paused`. If non-loop worktree changes are detected, the active task becomes `interrupted`; otherwise it may return to `queued`. The killed child session cannot be resumed in-place. Inspect Subagent Loop status and `git status` before running again.
 
-Removed command/tool surface: stop, resume, next, and ralph-control.
+Removed command/tool surface: stop, resume, next, and ralph-control. Legacy `/ralph-*` commands and `ralph_orchestrator_*` tools have been replaced by `/loop-*` and `subagent_loop_*`.

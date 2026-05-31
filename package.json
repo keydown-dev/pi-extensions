@@ -1,14 +1,17 @@
 {
   "name": "@keydown-dev/pi-ralph-orchestrator",
   "version": "0.0.1",
-  "description": "Fresh-context Ralph-style orchestrator for Pi with git checkpoints and handoff artifacts.",
+  "description": "Subagent Loop fresh-context worker orchestration for Pi with git checkpoints and handoff artifacts.",
   "type": "module",
   "keywords": [
     "pi-package",
     "pi",
     "ralph",
     "orchestrator",
-    "subagents"
+    "subagent-loop",
+    "subagents",
+    "fresh-context",
+    "loop"
   ],
   "license": "MIT",
   "pi": {

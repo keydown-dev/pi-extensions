@@ -147,8 +147,8 @@ export class RalphOrchestrator {
         iteration.diff = { filesChanged: hasWorkerChanges ? (await this.git.changedPaths()).filter((filePath) => !filePath.startsWith(".ralph/")).length : 0, insertions: 0, deletions: 0 };
         iteration.verification = {
           status: "failed",
-          commands: [{ command: "ralph-kill", exitCode: killed > 0 ? 143 : 0, summary: hasWorkerChanges ? "Worker killed; partial edits may remain" : "Worker killed; no worktree edits detected" }],
-          notes: hasWorkerChanges ? "Inspect git status before running Ralph again." : "No non-Ralph worktree edits were detected at kill time.",
+          commands: [{ command: "loop-kill", exitCode: killed > 0 ? 143 : 0, summary: hasWorkerChanges ? "Worker killed; partial edits may remain" : "Worker killed; no worktree edits detected" }],
+          notes: hasWorkerChanges ? "Inspect git status before running the loop again." : "No non-loop worktree edits were detected at kill time.",
         };
       }
     }
@@ -159,7 +159,7 @@ export class RalphOrchestrator {
 
   async next(name: string, options: RunOptions = {}): Promise<LoopState> {
     const state = await this.store.readState(slify(name));
-    if (state.control === "paused") throw new Error(`Loop is paused: ${state.name}. Use /ralph-run ${state.name} to resume and run queued work.`);
+    if (state.control === "paused") throw new Error(`Loop is paused: ${state.name}. Use /loop-run ${state.name} to resume and run queued work.`);
     if (state.todos.some((todo) => todo.status === "failed" || todo.status === "interrupted")) throw new Error(`Loop needs attention before running: ${state.name}`);
     await this.git.assertCleanWorktree({ ignorePrefixes: [".ralph"] });
 
@@ -193,7 +193,7 @@ export class RalphOrchestrator {
     await this.store.createIterationFiles(state, iteration, todo);
     await fs.writeFile(path.join(this.store.getIterationDir(state.name, iterationNumber), "git-before.txt"), await this.git.captureStatus(), "utf8");
     await this.store.writeState(state);
-    options.onProgress?.({ state, message: `Started Ralph iteration ${iterationNumber}: ${todo.title}` });
+    options.onProgress?.({ state, message: `Started loop iteration ${iterationNumber}: ${todo.title}` });
     await this.git.addAllAndCommit(handoffCommitMessage(todo.id, iterationNumber));
 
     const forwardWorkerProgress = (progress: WorkerProgress): void => {
@@ -232,7 +232,7 @@ export class RalphOrchestrator {
     const latest = await this.store.readState(state.name);
     preserveExternalRunUpdates(state, latest, todo.id);
     const externallyPaused = latest.control === "paused";
-    const killed = /ralph-kill/i.test(result.verification.notes ?? "") || result.verification.commands.some((command) => /ralph-kill/i.test(command.summary));
+    const killed = /(?:ralph-kill|loop kill|loop-kill)/i.test(result.verification.notes ?? "") || result.verification.commands.some((command) => /(?:ralph-kill|loop kill|loop-kill)/i.test(command.summary));
 
     iteration.verification = result.verification;
     iteration.afterRef = afterRef(state.name, iterationNumber);
@@ -253,7 +253,7 @@ export class RalphOrchestrator {
     await this.store.writeWorkerArtifacts(state, iteration, result);
     await fs.writeFile(path.join(this.store.getIterationDir(state.name, iterationNumber), "git-after.txt"), await this.git.captureStatus(), "utf8");
     await this.store.writeState(state);
-    options.onProgress?.({ state, message: `Finished Ralph iteration ${iterationNumber} with ${result.verification.status}` });
+    options.onProgress?.({ state, message: `Finished loop iteration ${iterationNumber} with ${result.verification.status}` });
     await this.git.addAllAndCommit(workerCommitMessage(todo.id, iterationNumber, result.commitSubject));
     await this.git.createRef(iteration.afterRef);
     await options.onIterationComplete?.({ state, iteration, todo, result });
@@ -344,7 +344,7 @@ function resolveEffectiveWorker(todo: RalphTodo, state: LoopState, options: RunO
 
 function assertLoopSafeForTodoInsertion(state: LoopState): void {
   if (state.todos.some((todo) => todo.status === "running") || state.iterations.some((iteration) => iteration.status === "running")) {
-    throw new Error(`Cannot insert a Ralph todo while loop is running: ${state.name}. Pause or wait for the active worker to finish first.`);
+    throw new Error(`Cannot insert a loop todo while loop is running: ${state.name}. Pause or wait for the active worker to finish first.`);
   }
 }
 
@@ -357,7 +357,7 @@ function assertValidInsertAtIndex(state: LoopState, insertAtIndex: number): void
   let completedPrefixLength = 0;
   for (const todo of state.todos) {
     if (todo.status === "complete") {
-      if (seenIncomplete) throw new Error(`Cannot insert Ralph todo because completed todos in ${state.name} do not form a prefix.`);
+      if (seenIncomplete) throw new Error(`Cannot insert loop todo because completed todos in ${state.name} do not form a prefix.`);
       completedPrefixLength += 1;
     } else {
       seenIncomplete = true;
@@ -365,7 +365,7 @@ function assertValidInsertAtIndex(state: LoopState, insertAtIndex: number): void
   }
 
   if (insertAtIndex < completedPrefixLength) {
-    throw new Error(`Cannot insert Ralph todo before completed work. insertAtIndex must be at least ${completedPrefixLength}.`);
+    throw new Error(`Cannot insert loop todo before completed work. insertAtIndex must be at least ${completedPrefixLength}.`);
   }
 }
 
@@ -405,7 +405,7 @@ export function renderStatus(state: LoopState): string {
   const displayStatus = deriveLoopStatus(state);
   const runBudget = state.runBudget ? ` · Run budget ${state.runBudget.remaining}` : "";
   const lines = [
-    `${statusIcon(displayStatus)} Ralph Orchestrator · ${state.name}`,
+    `${statusIcon(displayStatus)} Subagent Loop · ${state.name}`,
     `Status: ${displayStatus} · Control: ${state.control} · Iteration ${state.currentIteration}${max} · Todos ${completed}/${state.todos.length}${runBudget}`,
     `Branch: ${state.branch}`,
     "",
@@ -417,13 +417,13 @@ export function renderStatus(state: LoopState): string {
       return `${index === state.todos.length - 1 ? "└─" : "├─"} ${todoIcon(todo.status)} #${todo.id} ${todo.title}${todo.status === "running" ? " (working)" : ""}${todo.status === "deferred" ? " (deferred)" : ""}${modelText}${diff}`;
     }),
     "",
-    "Chat to pause, resume, kill or steer the orchestrator.",
+    "Chat to pause, resume, kill, or steer the loop.",
   ];
   return lines.join("\n");
 }
 
 export function renderLoopList(states: LoopState[]): string {
-  if (states.length === 0) return "No Ralph orchestrator loops found.";
+  if (states.length === 0) return "No Subagent Loops found.";
   return states.map((state) => {
     const completed = state.todos.filter((todo) => todo.status === "complete").length;
     const max = state.maxIterations ? `/${state.maxIterations}` : "";

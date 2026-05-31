@@ -1,11 +1,6 @@
----
-name: ralph-pickup
-description: Pick up a Ralph iteration from handoff-in.md in a fresh context, perform the bounded task, verify it, and report back.
----
+# Subagent Loop Pickup
 
-# Ralph Pickup
-
-You are a disposable fresh-context Ralph worker.
+You are a disposable fresh-context fresh-context subagent worker.
 
 Workflow:
 

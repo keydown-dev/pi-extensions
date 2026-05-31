@@ -31,8 +31,8 @@ export class PiJsonWorkerRunner {
         changedFiles: [],
         verification: {
           status: "failed",
-          commands: [{ command: "pi --mode json <ralph-pickup>", exitCode, summary: killed ? "Worker process killed by ralph-kill" : stderr || "Worker process failed" }],
-          notes: killed ? "Worker was killed by ralph-kill. Partial edits may remain; inspect git status before resuming." : undefined,
+          commands: [{ command: "pi --mode json <subagent-loop pickup>", exitCode, summary: killed ? "Worker process killed by loop kill" : stderr || "Worker process failed" }],
+          notes: killed ? "Worker was killed by loop kill. Partial edits may remain; inspect git status before resuming." : undefined,
         },
         usage,
         ...observed,
@@ -67,11 +67,11 @@ export class PiJsonWorkerRunner {
 
   private async buildPrompt(input: WorkerInput, handoffIn: string, handoffOut: string, verificationPath: string): Promise<string> {
     const skill = await readPickupSkill(input.packageRoot);
-    return `You are a fresh-context Ralph worker running in a child Pi process.
+    return `You are a fresh-context Subagent Loop worker running in a child Pi process.
 
-<ralph-pickup-skill>
+<subagent-loop-pickup>
 ${skill}
-</ralph-pickup-skill>
+</subagent-loop-pickup>
 
 Input handoff path:
 ${handoffIn}
@@ -86,7 +86,7 @@ Important constraints:
 - If blocked, write handoff-out.md and verification.md explaining the blocker.
 - Before finishing, ensure verification.md has a line like: Status: passed OR Status: failed OR Status: not_run.
 - Include a ## Commit subject section in handoff-out.md with one short single-line commit subject that follows this project's commit style when you can infer it.
-- Do not start the next Ralph iteration.`;
+- Do not start the next Subagent Loop iteration.`;
   }
 }
 
@@ -339,8 +339,8 @@ function cloneProgress(progress: WorkerProgress): WorkerProgress {
 
 async function readPickupSkill(packageRoot: string | undefined): Promise<string> {
   const candidates = [
-    packageRoot ? path.join(packageRoot, "skills", "ralph-pickup", "SKILL.md") : undefined,
-    path.join(process.cwd(), "skills", "ralph-pickup", "SKILL.md"),
+    packageRoot ? path.join(packageRoot, "skills", "subagent-loop", "refs", "pickup.md") : undefined,
+    path.join(process.cwd(), "skills", "subagent-loop", "refs", "pickup.md"),
   ].filter((candidate): candidate is string => Boolean(candidate));
 
   for (const candidate of candidates) {

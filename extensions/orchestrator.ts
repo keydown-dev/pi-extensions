@@ -118,7 +118,7 @@ export default function (pi: ExtensionAPI) {
     const defaultWorkerModel = parseModel(argv);
     const state = await new RalphOrchestrator(ctx.cwd, packageRoot).start({ name, todos: parseTodos(argv), maxIterations: parseMax(argv), defaultWorkerModel, defaultWorkerContextWindow: resolveWorkerContextWindow(ctx, defaultWorkerModel) });
     setCurrent(ctx, state);
-    ctx.ui.notify(`Prepared Subagent Loop loop: ${state.name}. Use /loop-run ${state.name} to run queued work.`, "info");
+    ctx.ui.notify(`Prepared Subagent Loop: ${state.name}. Use /loop-run ${state.name} to run queued work.`, "info");
   }
 
   async function pauseLoop(args: string, ctx: ExtensionContext): Promise<void> {
@@ -215,11 +215,11 @@ export default function (pi: ExtensionAPI) {
     ctx.ui.notify(`${label} started in the background. You can keep chatting; progress will update in the Subagent Loop widget.`, "info");
   }
 
-  pi.registerCommand("loop-start", command("Start a Subagent Loop loop", startLoop));
-  pi.registerCommand("loop-pause", command("Pause active Subagent Loop loop", pauseLoop));
+  pi.registerCommand("loop-start", command("Start a Subagent Loop", startLoop));
+  pi.registerCommand("loop-pause", command("Pause active Subagent Loop", pauseLoop));
   pi.registerCommand("loop-kill", command("Kill active Subagent Loop worker process and pause the loop", killLoop));
   pi.registerCommand("loop-status", command("Show current or named Subagent Loop status", showStatus));
-  pi.registerCommand("loop-list", command("List Subagent Loop loops", showList));
+  pi.registerCommand("loop-list", command("List Subagent Loops", showList));
   pi.registerCommand("loop-run", command("Run one or more Subagent Loop worker iterations", runLoop));
   pi.registerCommand("loop-assign-model", command("Assign a worker model to a future loop todo", assignTodoModel));
   pi.registerCommand("loop-widget", {
@@ -286,8 +286,8 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "subagent_loop_start",
     label: "Start Subagent Loop",
-    description: "Create a Subagent Loop loop from a natural-language task.",
-    promptSnippet: "Create a Subagent Loop loop with a plan, todo list, and max-iteration setting.",
+    description: "Create a Subagent Loop from a natural-language task.",
+    promptSnippet: "Create a Subagent Loop with a plan, todo list, and max-iteration setting.",
     parameters: Type.Object({
       name: Type.String({ description: "Short loop name" }),
       taskContent: Type.String({ description: "Markdown plan with goals, checklist, notes, and verification expectations" }),
@@ -299,14 +299,14 @@ export default function (pi: ExtensionAPI) {
       const todos = params.todos?.length ? params.todos : extractTodos(params.taskContent);
       const state = await new RalphOrchestrator(ctx.cwd, packageRoot).start({ name: params.name, todos, maxIterations: params.maxIterations, defaultWorkerModel: params.defaultWorkerModel, defaultWorkerContextWindow: resolveWorkerContextWindow(ctx, params.defaultWorkerModel) });
       setCurrent(ctx, state);
-      return { content: [{ type: "text", text: renderToolResponse(state, `Created Subagent Loop loop "${state.name}" with ${state.todos.length} todos.`) }], details: { state, nextAction: nextActionForState(state) } };
+      return { content: [{ type: "text", text: renderToolResponse(state, `Created Subagent Loop "${state.name}" with ${state.todos.length} todos.`) }], details: { state, nextAction: nextActionForState(state) } };
     },
   });
 
   pi.registerTool({
     name: "subagent_loop_run",
     label: "Run Subagent Loop",
-    description: "Run one or more worker iterations for a Subagent Loop loop. Running a paused loop resumes it.",
+    description: "Run one or more worker iterations for a Subagent Loop. Running a paused loop resumes it.",
     promptSnippet: "Run a Subagent Loop for a bounded number of iterations, then inspect status and artifacts.",
     parameters: Type.Object({
       name: Type.Optional(Type.String({ description: "Loop name. Defaults to the current active loop when available." })),
@@ -386,7 +386,7 @@ export default function (pi: ExtensionAPI) {
 
   pi.registerTool({
     name: "subagent_loop_pause",
-    label: "Pause Subagent Loop Loop",
+    label: "Pause Subagent Loop",
     description: "Pause a Subagent Loop after the current worker iteration exits. Does not kill the active child process.",
     promptSnippet: "Pause the active Subagent Loop after the current worker exits.",
     parameters: Type.Object({ name: Type.Optional(Type.String({ description: "Loop name. Defaults to the current active loop when available." })) }),
@@ -416,8 +416,8 @@ export default function (pi: ExtensionAPI) {
 
   pi.registerTool({
     name: "subagent_loop_status",
-    label: "Ralph Status",
-    description: "Inspect status for the active or named Subagent Loop loop.",
+    label: "Subagent Loop Status",
+    description: "Inspect status for the active or named Subagent Loop.",
     promptSnippet: "Check Subagent Loop status before deciding whether to continue, pause, kill, or inspect artifacts.",
     parameters: Type.Object({ name: Type.Optional(Type.String({ description: "Loop name. Defaults to the current active loop when available." })) }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
@@ -436,7 +436,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "subagent_loop_list",
     label: "List Subagent Loops",
-    description: "List Subagent Loop loops in this workspace.",
+    description: "List Subagent Loops in this workspace.",
     promptSnippet: "List available Subagent Loops when the user asks what is running or when no active loop is known.",
     parameters: Type.Object({}),
     async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
@@ -484,7 +484,7 @@ Primary commands:
   /loop-widget [toggle|compact|expand|show|hide] Set Subagent Loop widget mode (Ctrl+Opt+R expands/contracts)
 
 Natural usage:
-  Ask: "Can we set up a ralph loop to get through our issues? Max of 5 loops."`;
+  Ask: "Can we set up a Subagent Loop to get through our issues? Max of 5 loops."`;
 
 function buildPlanPrompt(request: string): string {
   const goal = request || "Plan a Subagent Loop for the work I want to accomplish.";

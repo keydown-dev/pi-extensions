@@ -13,7 +13,7 @@ import { contextPressure, renderRalphWidget } from "../extensions/orchestrator.j
 
 const execFileAsync = promisify(execFile);
 
-test("scripted Ralph loop adds tests and implementations over three iterations", async (t) => {
+test("scripted Subagent Loop adds tests and implementations over three iterations", async (t) => {
   const cwd = await createMathFixture();
   t.after(() => fs.rm(cwd, { recursive: true, force: true }));
   const ralph = new RalphOrchestrator(cwd);
@@ -36,7 +36,7 @@ test("scripted Ralph loop adds tests and implementations over three iterations",
   await execFileAsync("npm", ["test"], { cwd });
 
   const status = renderStatus(state);
-  assert.match(status, /Ralph Orchestrator · math-kata/);
+  assert.match(status, /Subagent Loop · math-kata/);
   assert.match(status, /Todos 3\/3/);
   assert.match(status, /└─ ✓ #003-add-divide-test-and-implementation Add divide/);
   assert.match(status, /\+\d+ \/ -\d+ · \d+ files/);
@@ -419,7 +419,7 @@ test("completion callback is emitted before the next iteration starts", async (t
     maxIterations: 2,
     workerMode: "scripted",
     onProgress(progress) {
-      if (progress.message.startsWith("Started Ralph iteration")) events.push(`start:${progress.state.currentIteration}`);
+      if (progress.message.startsWith("Started loop iteration")) events.push(`start:${progress.state.currentIteration}`);
     },
     onIterationComplete(event) {
       events.push(`complete:${event.iteration.number}:${event.result.verification.status}`);
@@ -429,7 +429,7 @@ test("completion callback is emitted before the next iteration starts", async (t
   assert.deepEqual(events, ["start:1", "complete:1:passed", "start:2", "complete:2:passed"]);
 });
 
-test("Ralph widget renders rounded panel title summary and progress", () => {
+test("Subagent Loop widget renders rounded panel title summary and progress", () => {
   const state = parseLoopStateJson(JSON.stringify({
     name: "widget-header-demo",
     control: "active",
@@ -460,7 +460,7 @@ test("Ralph widget renders rounded panel title summary and progress", () => {
   assert.doesNotMatch(output, /Ralph Loop · widget-header-demo|✗0|↓\d+ [○Ⅱ◌]|↑\d+ [✓✗]/);
 });
 
-test("Ralph widget expanded mode renders all todos inside side borders", () => {
+test("Subagent Loop widget expanded mode renders all todos inside side borders", () => {
   const state = parseLoopStateJson(JSON.stringify({
     name: "widget-expanded-demo",
     control: "active",
@@ -486,7 +486,7 @@ test("Ralph widget expanded mode renders all todos inside side borders", () => {
   assert.doesNotMatch(output, /more|↓\d+ [○Ⅱ◌]|↑\d+ [✓✗]/);
 });
 
-test("Ralph widget compact mode focuses actionable todo without header badges", () => {
+test("Subagent Loop widget compact mode focuses actionable todo without header badges", () => {
   const state = parseLoopStateJson(JSON.stringify({
     name: "widget-compact-demo",
     control: "active",
@@ -508,7 +508,7 @@ test("Ralph widget compact mode focuses actionable todo without header badges", 
   assert.doesNotMatch(output, /#1 First done|#3 Current work|#4 Later work|↑1 ✓|↓1 ○/);
 });
 
-test("Ralph widget compact mode selects queued work before latest complete", () => {
+test("Subagent Loop widget compact mode selects queued work before latest complete", () => {
   const state = parseLoopStateJson(JSON.stringify({
     name: "widget-queued-demo",
     control: "active",
@@ -548,7 +548,7 @@ test("contextPressure derives warning and error thresholds", () => {
   assert.equal(contextPressure(worker(500, undefined)).level, "unknown");
 });
 
-test("Ralph widget renders warning and error context pressure styling", () => {
+test("Subagent Loop widget renders warning and error context pressure styling", () => {
   const state = parseLoopStateJson(JSON.stringify({
     name: "widget-pressure-demo",
     control: "active",
@@ -581,7 +581,7 @@ test("Ralph widget renders warning and error context pressure styling", () => {
   assert.match(error, /50\.0%\/1k/);
 });
 
-test("Ralph widget uses header color for panel chrome and highlights running rows", () => {
+test("Subagent Loop widget uses header color for panel chrome and highlights running rows", () => {
   const state = parseLoopStateJson(JSON.stringify({
     name: "widget-border-demo",
     control: "active",
@@ -600,7 +600,7 @@ test("Ralph widget uses header color for panel chrome and highlights running row
   assert.doesNotMatch(output, /<border>╭|›/);
 });
 
-test("Ralph widget renders detail row in model tokens context cost time diff files order", () => {
+test("Subagent Loop widget renders detail row in model tokens context cost time diff files order", () => {
   const state = parseLoopStateJson(JSON.stringify({
     name: "widget-demo",
     control: "active",
@@ -628,7 +628,7 @@ test("Ralph widget renders detail row in model tokens context cost time diff fil
   assert.doesNotMatch(output, /anthropic\/sonnet|1 files|passed|verification ok|Used /);
 });
 
-test("Ralph widget renders running worker usage without tool phrases", () => {
+test("Subagent Loop widget renders running worker usage without tool phrases", () => {
   const state = parseLoopStateJson(JSON.stringify({
     name: "widget-running-demo",
     control: "active",
@@ -663,7 +663,7 @@ test("Ralph widget renders running worker usage without tool phrases", () => {
   assert.doesNotMatch(output, /openai-codex\/gpt-5\.5|Used Read|tools read, edit|›/);
 });
 
-test("Ralph widget renders queued and deferred placeholder telemetry", () => {
+test("Subagent Loop widget renders queued and deferred placeholder telemetry", () => {
   const state = parseLoopStateJson(JSON.stringify({
     name: "widget-placeholder-demo",
     control: "paused",
@@ -693,7 +693,7 @@ test("Ralph widget renders queued and deferred placeholder telemetry", () => {
   assert.match(output, /Ⅱ   #2 Later work[\s\S]*sonnet · ↑0 ↓0 · 0%\/272k · \$0\.0000 · 0s/);
 });
 
-test("Ralph widget footers use the same compact and expanded controls", () => {
+test("Subagent Loop widget footers use the same compact and expanded controls", () => {
   const state = parseLoopStateJson(JSON.stringify({
     name: "widget-footer-demo",
     control: "active",
@@ -714,7 +714,7 @@ test("Ralph widget footers use the same compact and expanded controls", () => {
   assert.doesNotMatch(`${compact}\n${expanded}`, /\/ralph-widget hide|Ctrl\+Opt\+R (Expand$|Compact$)/m);
 });
 
-test("Ralph widget renders verification problem markers", () => {
+test("Subagent Loop widget renders verification problem markers", () => {
   const state = parseLoopStateJson(JSON.stringify({
     name: "widget-fail-demo",
     control: "active",
@@ -907,7 +907,7 @@ test("schema accepts persisted worker model fields", () => {
   assert.equal(state.iterations[0]?.observedModel, "actual/model");
 });
 
-test("Ralph widget displays durable todo default and completed model", () => {
+test("Subagent Loop widget displays durable todo default and completed model", () => {
   const state = parseLoopStateJson(JSON.stringify({
     name: "widget-model-demo",
     control: "active",
@@ -989,7 +989,7 @@ test("orchestrator artifacts are created under ignored .ralph/orchestrator", asy
   assert.equal(trackedArtifacts, "");
 });
 
-test("ralph gitignore generation is idempotent and preserves custom rules", async (t) => {
+test("loop gitignore generation is idempotent and preserves custom rules", async (t) => {
   const cwd = await createMathFixture();
   t.after(() => fs.rm(cwd, { recursive: true, force: true }));
   await fs.mkdir(path.join(cwd, ".ralph"), { recursive: true });

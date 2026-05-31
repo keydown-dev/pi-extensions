@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { deriveLoopStatus, RalphOrchestrator, renderLoopList, renderStatus } from "../src/orchestrator.js";
+import { slugifyLoopName } from "../src/paths.js";
 import type { InsertTodoResult, IterationCompleteEvent, LoopState, OrchestratorProgress, WorkerMode, WorkerProgress, WorkerUsage } from "../src/types.js";
 
 let currentLoop: string | null = null;
@@ -161,17 +162,28 @@ export default function (pi: ExtensionAPI) {
     const argv = splitArgs(args);
     const name = argv.shift() ?? currentLoop;
     if (!name) throw new Error("Usage: /ralph-run [name] [--max N] [--runner pi-json] [--model MODEL]");
+    const loopName = slugifyLoopName(name);
     const maxIterations = parseMax(argv) ?? 1;
-    startBackgroundLoop(ctx, name, `Ralph run for ${name}`, async () => {
+    startBackgroundLoop(ctx, loopName, `Ralph run for ${loopName}`, async () => {
       const workerModel = parseModel(argv);
-      const state = await new RalphOrchestrator(ctx.cwd, packageRoot).run(name, { maxIterations, workerMode: parseRunner(argv), workerModel, workerContextWindow: resolveWorkerContextWindow(ctx, workerModel), onProgress: commandProgress(ctx), onIterationComplete: postIterationSummary });
+      const state = await new RalphOrchestrator(ctx.cwd, packageRoot).run(loopName, { maxIterations, workerMode: parseRunner(argv), workerModel, workerContextWindow: resolveWorkerContextWindow(ctx, workerModel), onProgress: commandProgress(ctx), onIterationComplete: postIterationSummary });
       return { state, message: `Ralph run stopped at ${state.currentIteration} (${deriveLoopStatus(state)})` };
-    });
+    }, async () => {
+      const state = await new RalphOrchestrator(ctx.cwd, packageRoot).extendRun(loopName, maxIterations, "command");
+      updateUI(ctx, state);
+      return state;
+    }, maxIterations);
   }
 
-  function startBackgroundLoop(ctx: ExtensionContext, name: string, label: string, execute: () => Promise<{ state: LoopState; message: string }>): void {
+  function startBackgroundLoop(ctx: ExtensionContext, name: string, label: string, execute: () => Promise<{ state: LoopState; message: string }>, extendActive?: () => Promise<LoopState>, extensionCount = 1): void {
     if (activeJobs.has(name)) {
-      ctx.ui.notify(`Ralph loop is already running: ${name}`, "warning");
+      if (!extendActive) {
+        ctx.ui.notify(`Ralph loop is already running: ${name}`, "warning");
+        return;
+      }
+      void extendActive()
+        .then((state) => ctx.ui.notify(`Queued ${extensionCount} additional Ralph iteration${extensionCount === 1 ? "" : "s"} for ${state.name}.`, "info"))
+        .catch((error) => ctx.ui.notify(error instanceof Error ? error.message : String(error), "error"));
       return;
     }
     currentLoop = name;
@@ -289,19 +301,24 @@ export default function (pi: ExtensionAPI) {
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const name = params.name ?? currentLoop;
       if (!name) throw new Error("No Ralph loop name provided and no active loop is set.");
-      if (activeJobs.has(name)) throw new Error(`Ralph loop is already running: ${name}`);
-      currentLoop = name;
+      const loopName = slugifyLoopName(name);
+      currentLoop = loopName;
       const maxIterations = params.maxIterations ?? 1;
+      if (activeJobs.has(loopName)) {
+        const state = await new RalphOrchestrator(ctx.cwd, packageRoot).extendRun(loopName, maxIterations, "tool");
+        updateUI(ctx, state);
+        return { content: [{ type: "text", text: `Queued ${maxIterations} additional Ralph iteration${maxIterations === 1 ? "" : "s"} for "${state.name}".` }], details: { state, nextAction: `Continue chatting normally, or use /ralph-pause ${state.name} to pause after the current worker exits.` } };
+      }
       const job = new RalphOrchestrator(ctx.cwd, packageRoot)
-        .run(name, { maxIterations, workerMode: parseRunnerValue(params.runner), workerModel: params.model, workerContextWindow: resolveWorkerContextWindow(ctx, params.model), onProgress: commandProgress(ctx), onIterationComplete: postIterationSummary })
+        .run(loopName, { maxIterations, workerMode: parseRunnerValue(params.runner), workerModel: params.model, workerContextWindow: resolveWorkerContextWindow(ctx, params.model), onProgress: commandProgress(ctx), onIterationComplete: postIterationSummary })
         .then((state) => {
           setCurrent(ctx, state);
           ctx.ui.notify(`Ralph run stopped at ${state.currentIteration} (${deriveLoopStatus(state)})`, "info");
         })
         .catch((error) => ctx.ui.notify(error instanceof Error ? error.message : String(error), "error"))
-        .finally(() => activeJobs.delete(name));
-      activeJobs.set(name, job);
-      return { content: [{ type: "text", text: `Started Ralph run for "${name}" in the background. You can keep chatting; progress will update in the Ralph widget.` }], details: { state: { name, control: "active", maxIterations }, nextAction: `Continue chatting normally, or use /ralph-pause ${name} to pause after the current worker exits.` } };
+        .finally(() => activeJobs.delete(loopName));
+      activeJobs.set(loopName, job);
+      return { content: [{ type: "text", text: `Started Ralph run for "${loopName}" in the background. You can keep chatting; progress will update in the Ralph widget.` }], details: { state: { name: loopName, control: "active", maxIterations }, nextAction: `Continue chatting normally, or use /ralph-pause ${loopName} to pause after the current worker exits.` } };
     },
   });
 
@@ -321,8 +338,9 @@ export default function (pi: ExtensionAPI) {
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const name = params.name ?? currentLoop;
       if (!name) throw new Error("No Ralph loop name provided and no active loop is set.");
-      if (activeJobs.has(name)) throw new Error(`Cannot insert a Ralph todo while loop is running: ${name}. Pause or wait for the active worker to finish first.`);
-      const result = await new RalphOrchestrator(ctx.cwd, packageRoot).insertTodo({ name, id: params.id, title: params.title, insertAtIndex: params.insertAtIndex, status: params.status, dryRun: params.dryRun });
+      const loopName = slugifyLoopName(name);
+      if (activeJobs.has(loopName)) throw new Error(`Cannot insert a Ralph todo while loop is running: ${loopName}. Pause or wait for the active worker to finish first.`);
+      const result = await new RalphOrchestrator(ctx.cwd, packageRoot).insertTodo({ name: loopName, id: params.id, title: params.title, insertAtIndex: params.insertAtIndex, status: params.status, dryRun: params.dryRun });
       if (!result.dryRun) updateUI(ctx, result.state);
       return { content: [{ type: "text", text: renderInsertTodoResponse(result) }], details: { ...result, nextAction: result.dryRun ? "If the preview looks correct, call ralph_orchestrator_insert_todo again with dryRun false or omitted." : nextActionForState(result.state) } };
     },

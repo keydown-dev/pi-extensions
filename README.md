@@ -38,7 +38,7 @@ This package is not published to npm yet, so use the Git or local-path installat
 | --- | --- |
 | `/ralph-plan <goal>` | Start a planning interview using the bundled `ralph-plan` skill. |
 | `/ralph-start <name> [--max N] [--todo item ...]` | Prepare a new loop. Tasks beyond `--max N` are marked `deferred`; workers do not run until `/ralph-run`. |
-| `/ralph-run [name] [--max N] [--runner pi-json\|scripted] [--model MODEL]` | Run queued work in the background. If paused, this resumes the loop. Use `--max 1` for one iteration. |
+| `/ralph-run [name] [--max N] [--runner pi-json\|scripted] [--model MODEL]` | Run queued work in the background. If paused, this resumes the loop. If already running, this queues `N` more persisted run-budget iterations instead of starting a second worker. |
 | `/ralph-pause [name]` | Soft pause. A running worker may finish, but Ralph will not pick another queued task. |
 | `/ralph-kill [name]` | Hard abort active child worker processes, pause the loop, then require inspection before running again. |
 | `/ralph-status [name]` | Show loop control, derived status, iteration count, branch, and task progress. |
@@ -64,16 +64,17 @@ Agent tools:
 - `ralph_orchestrator_status`
 - `ralph_orchestrator_list`
 
-The run tool/command returns immediately after starting background orchestration, so the parent/orchestrator chat remains available while the Ralph widget streams progress. Widget hint: `Chat to pause, resume, kill or steer the orchestrator.`
+The run tool/command returns immediately after starting background orchestration, so the parent/orchestrator chat remains available while the Ralph widget streams progress. Calling it again while the same loop is running adds to `runBudget.remaining`; the active loop picks up that persisted budget after the current worker exits. Widget hint: `Chat to pause, resume, kill or steer the orchestrator.`
 
 `ralph_orchestrator_insert_todo` safely inserts a new todo after a stable `afterTodoId` without renumbering existing todos or completed iteration references. Todo IDs are semantic identity, not list positions; execution order follows the persisted todo array. The insert tool refuses to run while any todo/iteration is `running`, defaults the inserted todo to `deferred`, requires a caller-provided semantic ID such as `ISSUE-005.1`, increments `maxIterations` when present, updates both `state.json` and `plan.md`, and supports `dryRun: true` for preview.
 
 ## State model
 
-Loop state persists only control:
+Loop state persists control and, during active/background runs, a mutable run budget:
 
 ```ts
 loop.control: "active" | "paused"
+loop.runBudget?: { remaining: number; updatedAt: string; updatedBy?: "command" | "tool" | "orchestrator" }
 ```
 
 Task state carries work lifecycle:
@@ -94,7 +95,7 @@ Display status is derived:
 
 ## Control semantics
 
-- **Pause**: set loop control to `paused`. If a worker is already running, let it finish the current task, then do not start another task.
+- **Pause**: set loop control to `paused`, clear the active run budget, and defer queued work. If a worker is already running, let it finish the current task, then do not start another task.
 - **Resume**: there is no resume command. Running again (`/ralph-run`) sets control to `active` and picks queued work.
 - **Kill**: send `SIGTERM` to active child `pi --mode json` workers. The loop is paused. If non-Ralph worktree changes are detected, the running task becomes `interrupted`; otherwise it can return to `queued`. Inspect Ralph status and `git status` before running again.
 

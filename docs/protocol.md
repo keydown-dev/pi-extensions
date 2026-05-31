@@ -161,13 +161,15 @@ Worker responsibilities:
 
 `/ralph-start --max N` creates the first `N` tasks as `queued` and the rest as `deferred`.
 
-`/ralph-run --max N` sets control to `active`, scopes the current run to at most `N` queued tasks, and can promote deferred tasks into that scope when no queued work remains. Ralph only picks `queued` tasks.
+`/ralph-run --max N` sets control to `active`, persists `runBudget.remaining = N`, scopes the current run to at most `N` queued tasks, and can promote deferred tasks into that scope when no queued work remains. Ralph only picks `queued` tasks.
+
+If the loop is already running in the background, another `/ralph-run --max N` or `ralph_orchestrator_run({ maxIterations: N })` does not start a second worker. It adds `N` to the persisted run budget, promotes deferred work if needed, and the active orchestrator consults that budget after the current worker exits.
 
 Use `/ralph-run --max 1` for a single worker iteration. There is no `/ralph-next` command.
 
 ## Control semantics
 
-- **Pause** is soft: set control to `paused`. If a worker is already running, it is allowed to finish the active iteration, and the orchestrator does not start another iteration.
+- **Pause** is soft: set control to `paused`, clear the active run budget, and defer queued work. If a worker is already running, it is allowed to finish the active iteration, and the orchestrator does not start another iteration.
 - **Resume** is not a command. Running again with `/ralph-run` sets control to `active` and starts fresh worker iterations for queued work.
 - **Kill** is hard: send `SIGTERM` to active Ralph child worker processes for that loop and set control to `paused`. If non-Ralph worktree changes are detected, the active task becomes `interrupted`; otherwise it may return to `queued`. The killed child session cannot be resumed in-place. Inspect Ralph status and `git status` before running again.
 

@@ -65,6 +65,12 @@ export interface IterationState {
   commitSubject?: string;
 }
 
+export interface RunBudget {
+  remaining: number;
+  updatedAt: string;
+  updatedBy?: "command" | "tool" | "orchestrator";
+}
+
 export interface LoopState {
   name: string;
   control: LoopControl;
@@ -73,6 +79,7 @@ export interface LoopState {
   createdAt: string;
   updatedAt: string;
   maxIterations?: number;
+  runBudget?: RunBudget;
   todos: RalphTodo[];
   iterations: IterationState[];
 }

@@ -263,6 +263,48 @@ test("worker progress after pause does not repaint deferred todos as queued", as
   assert.ok(progressStatuses.slice(pausedAt).every((statuses) => !statuses.includes("queued")), JSON.stringify(progressStatuses));
 });
 
+test("running loop extension persists budget and starts one more worker", async (t) => {
+  const cwd = await createMathFixture();
+  t.after(() => fs.rm(cwd, { recursive: true, force: true }));
+  const ralph = new RalphOrchestrator(cwd);
+  await ralph.start({
+    name: "extend-running-demo",
+    todos: ["Add subtract test and implementation", "Add multiply test and implementation", "Add divide test and implementation"],
+    maxIterations: 1,
+  });
+  let extensionPromise: Promise<unknown> | undefined;
+
+  const state = await ralph.run("extend-running-demo", {
+    maxIterations: 1,
+    workerMode: "scripted",
+    onProgress(progress) {
+      if (!extensionPromise && progress.state.todos.some((todo) => todo.status === "running")) {
+        extensionPromise = ralph.extendRun("extend-running-demo", 1, "tool");
+      }
+    },
+  });
+  assert.ok(extensionPromise);
+  await extensionPromise;
+
+  assert.equal(state.currentIteration, 2);
+  assert.deepEqual(state.todos.map((todo) => todo.status), ["complete", "complete", "deferred"]);
+  const persisted = await ralph.status("extend-running-demo");
+  assert.equal(persisted.runBudget?.remaining, 0);
+});
+
+test("pause clears persisted run budget", async (t) => {
+  const cwd = await createMathFixture();
+  t.after(() => fs.rm(cwd, { recursive: true, force: true }));
+  const ralph = new RalphOrchestrator(cwd);
+  await ralph.start({ name: "pause-budget-demo", todos: ["First", "Second"], maxIterations: 1 });
+  await ralph.extendRun("pause-budget-demo", 1, "command");
+
+  const state = await ralph.pause("pause-budget-demo");
+
+  assert.equal(state.runBudget, undefined);
+  assert.deepEqual(state.todos.map((todo) => todo.status), ["deferred", "deferred"]);
+});
+
 test("deferred tasks are not picked until a later run scope", async (t) => {
   const cwd = await createMathFixture();
   t.after(() => fs.rm(cwd, { recursive: true, force: true }));

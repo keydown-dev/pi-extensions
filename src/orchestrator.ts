@@ -85,6 +85,7 @@ export class RalphOrchestrator {
   async pause(name: string): Promise<LoopState> {
     const state = await this.store.readState(slugifyLoopName(name));
     state.control = "paused";
+    delete state.runBudget;
     deferQueuedTodos(state);
     await this.store.writeState(state);
     if (!state.iterations.some((iteration) => iteration.status === "running")) {
@@ -180,6 +181,7 @@ export class RalphOrchestrator {
     iteration.changedFiles = result.changedFiles;
     iteration.commitSubject = result.commitSubject;
     const latest = await this.store.readState(state.name);
+    preserveExternalRunUpdates(state, latest, todo.id);
     const externallyPaused = latest.control === "paused";
     const killed = /ralph-kill/i.test(result.verification.notes ?? "") || result.verification.commands.some((command) => /ralph-kill/i.test(command.summary));
 
@@ -219,19 +221,38 @@ export class RalphOrchestrator {
     }
   }
 
+  async extendRun(name: string, count: number, updatedBy: "command" | "tool" = "command"): Promise<LoopState> {
+    if (!Number.isInteger(count) || count <= 0) throw new Error("Run extension count must be a positive integer.");
+    const state = await this.store.readState(slugifyLoopName(name));
+    if (state.todos.some((todo) => todo.status === "failed" || todo.status === "interrupted")) throw new Error(`Loop needs attention before running: ${state.name}`);
+    state.control = "active";
+    const current = state.runBudget?.remaining ?? 0;
+    state.runBudget = { remaining: current + count, updatedAt: new Date().toISOString(), updatedBy };
+    prepareRunScope(state, state.runBudget.remaining);
+    await this.store.writeState(state);
+    return state;
+  }
+
   async run(name: string, options: RunOptions = {}): Promise<LoopState> {
     const max = options.maxIterations ?? 1;
     let state = await this.store.readState(slugifyLoopName(name));
+    if (state.todos.some((todo) => todo.status === "failed" || todo.status === "interrupted")) throw new Error(`Loop needs attention before running: ${state.name}`);
     state.control = "active";
+    state.runBudget = { remaining: max, updatedAt: new Date().toISOString(), updatedBy: "orchestrator" };
     prepareRunScope(state, max);
     await this.store.writeState(state);
     await this.git.addAllAndCommit(`orchestrator: run ${state.name}`);
 
-    for (let i = 0; i < max; i++) {
+    while (true) {
       state = await this.store.readState(slugifyLoopName(name));
       if (state.control !== "active") break;
-      if (!state.todos.some((todo) => todo.status === "queued")) break;
       if (state.todos.some((todo) => todo.status === "failed" || todo.status === "interrupted")) break;
+      const remaining = state.runBudget?.remaining ?? 0;
+      if (remaining <= 0) break;
+      prepareRunScope(state, remaining);
+      if (!state.todos.some((todo) => todo.status === "queued")) break;
+      state.runBudget = { ...state.runBudget, remaining: remaining - 1, updatedAt: new Date().toISOString(), updatedBy: "orchestrator" };
+      await this.store.writeState(state);
       state = await this.next(name, options);
     }
     return this.store.readState(slugifyLoopName(name));
@@ -245,6 +266,16 @@ function slify(name: string): string {
 function deferQueuedTodos(state: LoopState): void {
   for (const todo of state.todos) {
     if (todo.status === "queued") todo.status = "deferred";
+  }
+}
+
+function preserveExternalRunUpdates(state: LoopState, latest: LoopState, activeTodoId: RalphTodo["id"]): void {
+  state.runBudget = latest.runBudget;
+  const latestTodosById = new Map(latest.todos.map((todo) => [String(todo.id), todo]));
+  for (const todo of state.todos) {
+    if (String(todo.id) === String(activeTodoId)) continue;
+    const latestTodo = latestTodosById.get(String(todo.id));
+    if (latestTodo) todo.status = latestTodo.status;
   }
 }
 
@@ -309,9 +340,10 @@ export function renderStatus(state: LoopState): string {
   const completed = state.todos.filter((todo) => todo.status === "complete").length;
   const max = state.maxIterations ? `/${state.maxIterations}` : "";
   const displayStatus = deriveLoopStatus(state);
+  const runBudget = state.runBudget ? ` · Run budget ${state.runBudget.remaining}` : "";
   const lines = [
     `${statusIcon(displayStatus)} Ralph Orchestrator · ${state.name}`,
-    `Status: ${displayStatus} · Control: ${state.control} · Iteration ${state.currentIteration}${max} · Todos ${completed}/${state.todos.length}`,
+    `Status: ${displayStatus} · Control: ${state.control} · Iteration ${state.currentIteration}${max} · Todos ${completed}/${state.todos.length}${runBudget}`,
     `Branch: ${state.branch}`,
     "",
     ...state.todos.map((todo, index) => {
@@ -331,7 +363,8 @@ export function renderLoopList(states: LoopState[]): string {
     const completed = state.todos.filter((todo) => todo.status === "complete").length;
     const max = state.maxIterations ? `/${state.maxIterations}` : "";
     const displayStatus = deriveLoopStatus(state);
-    return `${statusIcon(displayStatus)} ${state.name}: ${displayStatus} (control ${state.control}, iteration ${state.currentIteration}${max}, ${completed}/${state.todos.length} todos)`;
+    const runBudget = state.runBudget ? `, budget ${state.runBudget.remaining}` : "";
+    return `${statusIcon(displayStatus)} ${state.name}: ${displayStatus} (control ${state.control}, iteration ${state.currentIteration}${max}, ${completed}/${state.todos.length} todos${runBudget})`;
   }).join("\n");
 }
 

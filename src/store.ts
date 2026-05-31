@@ -239,6 +239,12 @@ const RalphTodoSchema = Type.Object({
   ]),
 }, { additionalProperties: false });
 
+const RunBudgetSchema = Type.Object({
+  remaining: Type.Number(),
+  updatedAt: Type.String(),
+  updatedBy: Type.Optional(Type.Union([Type.Literal("command"), Type.Literal("tool"), Type.Literal("orchestrator")])),
+}, { additionalProperties: false });
+
 const LoopStateSchema = Type.Object({
   name: Type.String(),
   control: Type.Union([Type.Literal("active"), Type.Literal("paused")]),
@@ -247,6 +253,7 @@ const LoopStateSchema = Type.Object({
   createdAt: Type.String(),
   updatedAt: Type.String(),
   maxIterations: Type.Optional(Type.Number()),
+  runBudget: Type.Optional(RunBudgetSchema),
   todos: Type.Array(RalphTodoSchema),
   iterations: Type.Array(IterationStateSchema),
 }, { additionalProperties: false });

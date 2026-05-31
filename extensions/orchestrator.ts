@@ -574,22 +574,40 @@ function renderInsertTodoResponse(result: InsertTodoResult): string {
 }
 
 type RalphTheme = ExtensionContext["ui"]["theme"];
+type RalphThemeColor = Parameters<RalphTheme["fg"]>[0];
+type RalphThemeBg = Parameters<RalphTheme["bg"]>[0];
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const PI_WORKING_SPINNER_INTERVAL_MS = 80;
 
 export function renderRalphWidget(state: LoopState, worker: WorkerProgress | undefined, theme: RalphTheme, width: number, mode: Exclude<RalphWidgetMode, "hidden"> = "expanded"): string[] {
   const safeWidth = Math.max(0, width);
   const todos = mode === "compact" ? selectedCompactTodo(state.todos) : state.todos;
-  const lines: string[] = [renderPanelTopBorder(state, worker, theme, safeWidth), renderPanelLine("", theme, safeWidth)];
+  const pressure = state.todos.some((todo) => todo.status === "running") ? contextPressure(worker) : { level: "unknown" as const };
+  const chromeColor = pressureColor(pressure.level) ?? "accent";
+  const lines: string[] = [renderPanelTopBorder(state, worker, theme, safeWidth, chromeColor), renderPanelLine("", theme, safeWidth, { borderColor: chromeColor })];
 
   for (const todo of todos) {
-    lines.push(...renderTodoRow(todo, state, worker, theme, safeWidth));
-    lines.push(renderPanelLine("", theme, safeWidth));
+    lines.push(...renderTodoRow(todo, state, worker, theme, safeWidth, chromeColor));
+    lines.push(renderPanelLine("", theme, safeWidth, { borderColor: chromeColor }));
   }
 
-  lines.push(renderPanelBottomProgressBorder(state, theme, safeWidth));
+  lines.push(renderPanelBottomProgressBorder(state, theme, safeWidth, chromeColor));
   lines.push(theme.fg("dim", "Ctrl+Opt+R Expand/Compact · Chat to resume, pause, edit, or kill the loop."));
   return lines.map((line) => truncateAnsiToWidth(line, safeWidth));
+}
+
+export type ContextPressure = "normal" | "warning" | "error" | "unknown";
+
+export function contextPressure(worker?: WorkerProgress): { level: ContextPressure; ratio?: number; percent?: number } {
+  if (!worker || worker.phase === "exited") return { level: "unknown" };
+  const contextTokens = worker.latestUsage?.contextTokens ?? worker.usage.contextTokens;
+  const contextWindow = worker.latestUsage?.contextWindow ?? worker.usage.contextWindow;
+  if (!Number.isFinite(contextTokens) || !Number.isFinite(contextWindow) || contextTokens === undefined || contextWindow === undefined || contextTokens < 0 || contextWindow <= 0) return { level: "unknown" };
+  const ratio = Math.min(1, Math.max(0, contextTokens / contextWindow));
+  const percent = Math.round(ratio * 100);
+  if (ratio >= 0.5) return { level: "error", ratio, percent };
+  if (ratio >= 0.4) return { level: "warning", ratio, percent };
+  return { level: "normal", ratio, percent };
 }
 
 type WidgetTodo = LoopState["todos"][number];
@@ -598,15 +616,18 @@ const PANEL_MIN_WIDTH = 8;
 const TODO_TITLE_PREFIX = "  ";
 const TODO_DETAIL_PREFIX = "      ";
 
-function renderTodoRow(todo: WidgetTodo, state: LoopState, worker: WorkerProgress | undefined, theme: RalphTheme, width: number): string[] {
+function renderTodoRow(todo: WidgetTodo, state: LoopState, worker: WorkerProgress | undefined, theme: RalphTheme, width: number, borderColor: RalphThemeColor): string[] {
   const iteration = latestIterationForTodo(state, todo.id);
   const isRunning = todo.status === "running";
+  const pressure = isRunning ? contextPressure(worker) : { level: "unknown" as const };
+  const runningPressureColor = pressureColor(pressure.level);
   const icon = todoGlyph(todo.status, isRunning ? worker?.elapsedMs : undefined);
-  const iconColor = todo.status === "complete" ? "success" : todo.status === "failed" || todo.status === "interrupted" ? "error" : todo.status === "running" ? "accent" : "dim";
-  const rowColor = todo.status === "deferred" ? "dim" : todo.status === "running" ? "accent" : "text";
+  const iconColor = todo.status === "complete" ? "success" : todo.status === "failed" || todo.status === "interrupted" ? "error" : todo.status === "running" ? runningPressureColor ?? "accent" : "dim";
+  const rowColor = todo.status === "deferred" ? "dim" : todo.status === "running" ? runningPressureColor ?? "accent" : "text";
   const title = `${TODO_TITLE_PREFIX}${theme.fg(todo.status === "deferred" ? "dim" : iconColor, icon)}   ${theme.fg(rowColor, `#${todo.id} ${todo.title}`)}`;
   const detail = `${TODO_DETAIL_PREFIX}${renderTodoDetail(todo, state, iteration, isRunning ? worker : undefined, worker, theme)}`;
-  return [renderPanelLine(title, theme, width, { highlight: isRunning }), renderPanelLine(detail, theme, width, { highlight: isRunning })];
+  const lineOptions = { highlight: isRunning, borderColor, highlightBg: pressureBg(pressure.level) };
+  return [renderPanelLine(title, theme, width, lineOptions), renderPanelLine(detail, theme, width, lineOptions)];
 }
 
 function selectedCompactTodo(todos: WidgetTodo[]): WidgetTodo[] {
@@ -619,8 +640,8 @@ function selectedCompactTodo(todos: WidgetTodo[]): WidgetTodo[] {
   return selected ? [selected] : [];
 }
 
-function renderPanelTopBorder(state: LoopState, worker: WorkerProgress | undefined, theme: RalphTheme, width: number): string {
-  if (width < PANEL_MIN_WIDTH) return theme.fg("border", truncatePlain("─".repeat(Math.max(0, width)), width));
+function renderPanelTopBorder(state: LoopState, worker: WorkerProgress | undefined, theme: RalphTheme, width: number, chromeColor: RalphThemeColor = "accent"): string {
+  if (width < PANEL_MIN_WIDTH) return theme.fg(chromeColor, truncatePlain("─".repeat(Math.max(0, width)), width));
   const innerWidth = width - 2;
   const metrics = loopSummaryMetrics(state, worker);
   const titlePrefix = "─ ";
@@ -640,31 +661,32 @@ function renderPanelTopBorder(state: LoopState, worker: WorkerProgress | undefin
     const titleWidth = Math.max(0, innerWidth - fixedWidth - 1);
     const title = truncatePlain(`Subagent Loop · ${state.name}`, titleWidth);
     const gapWidth = innerWidth - visibleWidth(titlePrefix) - visibleWidth(title) - visibleWidth(titleSuffix) - visibleWidth(summaryLeftPadding) - visibleWidth(summary) - visibleWidth(rightPadding);
-    if (gapWidth >= 1) return theme.fg("border", "╭" + titlePrefix) + theme.fg("accent", theme.bold(title)) + theme.fg("border", titleSuffix + "─".repeat(gapWidth) + summaryLeftPadding) + summary + theme.fg("border", rightPadding + "╮");
+    if (gapWidth >= 1) return theme.fg(chromeColor, "╭" + titlePrefix) + theme.fg(chromeColor, theme.bold(title)) + theme.fg(chromeColor, titleSuffix + "─".repeat(gapWidth) + summaryLeftPadding) + summary + theme.fg(chromeColor, rightPadding + "╮");
   }
 
   const title = truncatePlain(`Subagent Loop · ${state.name}`, Math.max(0, innerWidth - 4));
   const body = padPlain(`─ ${title} `, innerWidth, "─");
-  return theme.fg("border", "╭") + theme.fg("accent", theme.bold(title ? body : "─".repeat(innerWidth))) + theme.fg("border", "╮");
+  return theme.fg(chromeColor, "╭") + theme.fg(chromeColor, theme.bold(title ? body : "─".repeat(innerWidth))) + theme.fg(chromeColor, "╮");
 }
 
-function renderPanelLine(content: string, theme: RalphTheme, width: number, options: { highlight?: boolean } = {}): string {
+function renderPanelLine(content: string, theme: RalphTheme, width: number, options: { highlight?: boolean; borderColor?: RalphThemeColor; highlightBg?: RalphThemeBg } = {}): string {
   if (width < PANEL_MIN_WIDTH) return truncateAnsiToWidth(content, width);
   const innerWidth = width - 2;
   const inner = padAnsiToWidth(truncateAnsiToWidth(content, innerWidth), innerWidth);
-  const highlighted = options.highlight ? themeBg(theme, "toolPendingBg", inner) : inner;
-  return theme.fg("border", "│") + highlighted + theme.fg("border", "│");
+  const highlighted = options.highlight ? themeBg(theme, options.highlightBg ?? "toolPendingBg", inner) : inner;
+  const borderColor = options.borderColor ?? "accent";
+  return theme.fg(borderColor, "│") + highlighted + theme.fg(borderColor, "│");
 }
 
-function renderPanelBottomProgressBorder(state: LoopState, theme: RalphTheme, width: number): string {
-  if (width < PANEL_MIN_WIDTH) return theme.fg("border", truncatePlain("─".repeat(Math.max(0, width)), width));
+function renderPanelBottomProgressBorder(state: LoopState, theme: RalphTheme, width: number, chromeColor: RalphThemeColor = "accent"): string {
+  if (width < PANEL_MIN_WIDTH) return theme.fg(chromeColor, truncatePlain("─".repeat(Math.max(0, width)), width));
   const innerWidth = width - 2;
   const metrics = loopSummaryMetrics(state, undefined);
   const barWidth = Math.max(0, innerWidth - 3);
   const filledWidth = metrics.total > 0 ? Math.round((metrics.complete / metrics.total) * barWidth) : 0;
-  const filled = theme.fg("success", "━".repeat(filledWidth));
-  const remaining = theme.fg("border", "─".repeat(Math.max(0, barWidth - filledWidth)));
-  return theme.fg("border", "╰─ ") + filled + remaining + theme.fg("border", " ╯");
+  const filled = fgWhite("━".repeat(filledWidth));
+  const remaining = theme.fg(chromeColor, "─".repeat(Math.max(0, barWidth - filledWidth)));
+  return theme.fg(chromeColor, "╰─ ") + filled + remaining + theme.fg(chromeColor, " ╯");
 }
 
 function loopSummaryMetrics(state: LoopState, worker: WorkerProgress | undefined): { complete: number; total: number; errors: number; cost?: number; elapsedMs?: number } {
@@ -863,9 +885,21 @@ function renderUsageSegments(usage: WorkerUsage | undefined, theme: RalphTheme):
 
 function renderRunningUsageSegments(worker: WorkerProgress, theme: RalphTheme): string[] {
   if (!worker.usage.totalTokens) return [];
-  const latestContextTokens = worker.latestUsage?.totalTokens;
+  const contextTokens = worker.latestUsage?.contextTokens ?? worker.usage.contextTokens;
   const contextWindow = worker.latestUsage?.contextWindow ?? worker.usage.contextWindow;
-  return renderUsageSegmentsForDisplay({ ...worker.usage, ...(latestContextTokens ? { contextTokens: latestContextTokens } : {}), ...(contextWindow ? { contextWindow } : {}) }, theme);
+  return renderUsageSegmentsForDisplay({ ...worker.usage, ...(contextTokens !== undefined && contextWindow ? { contextTokens, contextWindow } : { contextWindow: undefined }) }, theme);
+}
+
+function pressureColor(level: ContextPressure): RalphThemeColor | undefined {
+  return level === "warning" ? "warning" : level === "error" ? "error" : undefined;
+}
+
+function pressureBg(level: ContextPressure): RalphThemeBg | undefined {
+  return level === "error" ? "toolErrorBg" : level === "warning" ? "toolPendingBg" : undefined;
+}
+
+function fgWhite(text: string): string {
+  return `\x1b[97m${text}\x1b[39m`;
 }
 
 function renderUsageSegmentsForDisplay(usage: WorkerUsage, theme: RalphTheme): string[] {

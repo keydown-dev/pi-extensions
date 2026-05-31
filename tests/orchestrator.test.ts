@@ -9,7 +9,7 @@ import { extractCommitSubjectFromHandoff, handoffCommitMessage, sanitizeWorkerCo
 import { GitPolicy } from "../src/git.js";
 import { deriveLoopStatus, RalphOrchestrator, renderStatus } from "../src/orchestrator.js";
 import { parseLoopStateJson } from "../src/store.js";
-import { renderRalphWidget } from "../extensions/orchestrator.js";
+import { contextPressure, renderRalphWidget } from "../extensions/orchestrator.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -456,7 +456,7 @@ test("Ralph widget renders rounded panel title summary and progress", () => {
 
   const output = renderRalphWidget(state, undefined, plainTheme as never, 120).join("\n");
   assert.match(output, /^╭─ Subagent Loop · widget-header-demo .*✓ 1\/3 · ✗1 · \$0\.1234 · 1m 0s ╮/m);
-  assert.match(output, /╰─ [━─]+ ╯/);
+  assert.match(output, /╰─ (?:\x1b\[97m)?[━─]+(?:\x1b\[39m)?[━─]* ╯/);
   assert.doesNotMatch(output, /Ralph Loop · widget-header-demo|✗0|↓\d+ [○Ⅱ◌]|↑\d+ [✓✗]/);
 });
 
@@ -529,7 +529,59 @@ test("Ralph widget compact mode selects queued work before latest complete", () 
   assert.doesNotMatch(output, /#1 First done|#2 Latest done/);
 });
 
-test("Ralph widget uses border color for panel chrome and highlights running rows", () => {
+test("contextPressure derives warning and error thresholds", () => {
+  const worker = (contextTokens?: number, contextWindow?: number) => ({
+    phase: "running" as const,
+    elapsedMs: 0,
+    events: 0,
+    toolCalls: 0,
+    toolNames: [],
+    assistantMessages: 0,
+    usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, contextTokens, contextWindow },
+  });
+
+  assert.equal(contextPressure(worker(399, 1000)).level, "normal");
+  assert.equal(contextPressure(worker(400, 1000)).level, "warning");
+  assert.equal(contextPressure(worker(499, 1000)).level, "warning");
+  assert.equal(contextPressure(worker(500, 1000)).level, "error");
+  assert.equal(contextPressure(worker(undefined, 1000)).level, "unknown");
+  assert.equal(contextPressure(worker(500, undefined)).level, "unknown");
+});
+
+test("Ralph widget renders warning and error context pressure styling", () => {
+  const state = parseLoopStateJson(JSON.stringify({
+    name: "widget-pressure-demo",
+    control: "active",
+    branch: "orchestrator/widget-pressure-demo",
+    currentIteration: 1,
+    createdAt: "2026-05-27T00:00:00.000Z",
+    updatedAt: "2026-05-27T00:00:00.000Z",
+    todos: [{ id: 1, title: "Current work", status: "running" }],
+    iterations: [],
+  }));
+  const worker = (contextTokens: number) => ({
+    phase: "running" as const,
+    model: "gpt-5.5",
+    elapsedMs: 0,
+    events: 0,
+    toolCalls: 0,
+    toolNames: [],
+    assistantMessages: 0,
+    usage: { input: 1000, output: 1000, cacheRead: 0, cacheWrite: 0, totalTokens: 2000, contextTokens, contextWindow: 1000 },
+  });
+
+  const warning = renderRalphWidget(state, worker(400), taggedTheme as never, 160, "compact").join("\n");
+  assert.match(warning, /<warning>╭─/);
+  assert.match(warning, /<warning>[^<]+<\/warning>   <warning>#1 Current work/);
+  assert.match(warning, /40\.0%\/1k/);
+
+  const error = renderRalphWidget(state, worker(500), taggedTheme as never, 160, "expanded").join("\n");
+  assert.match(error, /<error>╭─/);
+  assert.match(error, /<bg:toolErrorBg>  <error>[^<]+<\/error>   <error>#1 Current work/);
+  assert.match(error, /50\.0%\/1k/);
+});
+
+test("Ralph widget uses header color for panel chrome and highlights running rows", () => {
   const state = parseLoopStateJson(JSON.stringify({
     name: "widget-border-demo",
     control: "active",
@@ -542,9 +594,10 @@ test("Ralph widget uses border color for panel chrome and highlights running row
   }));
 
   const output = renderRalphWidget(state, undefined, taggedTheme as never, 200, "expanded").join("\n");
-  assert.match(output, /<border>╭─/);
+  assert.match(output, /<accent>╭─/);
   assert.match(output, /<bg:toolPendingBg>  <accent>[^<]+<\/accent>   <accent>#1 Current work/);
-  assert.doesNotMatch(output, /<accent>╭|›/);
+  assert.match(output, /\x1b\[97m━*\x1b\[39m/);
+  assert.doesNotMatch(output, /<border>╭|›/);
 });
 
 test("Ralph widget renders detail row in model tokens context cost time diff files order", () => {
@@ -603,7 +656,7 @@ test("Ralph widget renders running worker usage without tool phrases", () => {
     toolNames: ["read", "edit"],
     assistantMessages: 1,
     usage: { input: 261000, output: 21000, cacheRead: 4200000, cacheWrite: 0, totalTokens: 4482000, cost: 0.159, contextWindow: 272000 },
-    latestUsage: { input: 60000, output: 6000, cacheRead: 0, cacheWrite: 0, totalTokens: 66000 },
+    latestUsage: { input: 60000, output: 6000, cacheRead: 0, cacheWrite: 0, totalTokens: 66000, contextTokens: 66000 },
   }, plainTheme as never, 160).join("\n");
 
   assert.match(output, /gpt-5\.5 · ↑261k ↓21k R4\.2m · 24\.3%\/272k · \$0\.1590 · 1m 20s/);

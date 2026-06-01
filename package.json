@@ -1,18 +1,21 @@
 {
-  "name": "@keydown-dev/pi-subagent-loop",
+  "name": "@keydown-dev/pi-loops",
   "version": "0.0.1",
-  "description": "Subagent Loop fresh-context worker orchestration for Pi with git checkpoints and handoff artifacts.",
+  "description": "Loop orchestration for Pi with optional subagents, git checkpoints, and handoff artifacts.",
   "type": "module",
   "keywords": [
     "pi-package",
     "pi",
-    "subagent",
-    "ralph",
-    "wiggum",
+    "loops",
+    "loop",
     "orchestrator",
+    "subagent",
     "subagents",
     "fresh-context",
-    "loop"
+    "ralph",
+    "wiggum",
+    "ralph-loop",
+    "ralph-loops"
   ],
   "license": "MIT",
   "pi": {

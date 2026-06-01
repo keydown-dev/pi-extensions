@@ -153,7 +153,7 @@ function isIgnoredStatusLine(line: string, ignorePrefixes: string[]): boolean {
 }
 
 function isRawRalphWorkerTracePath(filePath: string): boolean {
-  return filePath.startsWith(".ralph/") && /(^|\/)worker-output\.raw\.jsonl(?:\..*)?$/.test(filePath);
+  return filePath.startsWith(".loop/") && /(^|\/)worker-output\.raw\.jsonl(?:\..*)?$/.test(filePath);
 }
 
 function cleanDeclaredPaths(paths: string[], excludePrefixes: string[]): string[] {

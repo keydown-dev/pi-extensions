@@ -1,6 +1,6 @@
 # Subagent Loop - fresh-context worker loops
 
-This package provides the **Subagent Loop** capability for Pi. It keeps the historical package name and legacy `.ralph/orchestrator/` artifact directory for compatibility, but the public command and tool surface is `/loop-*` and `subagent_loop_*`.
+This package provides the **Subagent Loop** capability for Pi. It writes local loop artifacts under `.loop/orchestrator/`, while the public command and tool surface is `/loop-*` and `subagent_loop_*`.
 
 Subagent Loop creates local loop artifacts, orchestration branches, before/after git refs for each iteration, fresh `pi --mode json` workers, and a deterministic scripted worker for tests.
 
@@ -42,7 +42,7 @@ This package is not published to npm yet, so use the Git or local-path installat
 | `/loop-pause [name]` | Soft pause. A running worker may finish, but the loop will not pick another queued task. |
 | `/loop-kill [name]` | Hard abort active child worker processes, pause the loop, then require inspection before running again. |
 | `/loop-status [name]` | Show loop control, derived status, iteration count, branch, and task progress. |
-| `/loop-list` | List all loops under `.ralph/orchestrator/loops/`. |
+| `/loop-list` | List all loops under `.loop/orchestrator/loops/`. |
 | `/loop-widget [toggle\|compact\|expand\|show\|hide]` | Set Subagent Loop widget mode. |
 
 Resume by running again with `/loop-run`; run one task with `/loop-run --max 1`.
@@ -109,15 +109,15 @@ Display status is derived:
 
 Starting a loop requires a clean worktree, creates/checks out `orchestrator/<loop-name>`, and commits initial loop state. Each iteration creates a handoff commit (`handoff: <todo-id> context`) before the worker starts, then a worker-result commit when the iteration finishes. Worker commits use a valid single-line `## Commit subject` from `handoff-out.md` when provided, otherwise fall back to `worker: <todo-id> changes`.
 
-Todo IDs are stable semantic identity (`001-document-protocol`, `ISSUE-005.1`); physical iteration numbers, directories, and refs remain numeric and chronological. The orchestrator records before/after refs and captures code diff stats for completed work, excluding local `.ralph/` artifacts from displayed line counts.
+Todo IDs are stable semantic identity (`001-document-protocol`, `ISSUE-005.1`); physical iteration numbers, directories, and refs remain numeric and chronological. The orchestrator records before/after refs and captures code diff stats for completed work, excluding local `.loop/` artifacts from displayed line counts.
 
-Loop artifacts currently live under the legacy `.ralph/orchestrator/` directory. This repo ignores `.ralph/` so loop state, handoffs, and worker transcripts stay local unless a project explicitly chooses to track them. When `.ralph/` is tracked, `worker-output.jsonl` is the compact committed worker event summary. Raw diagnostic traces such as `worker-output.raw.jsonl` are local-only, ignored by managed `.ralph/.gitignore`, and unstaged before commits. Enable raw traces for debugging with `RALPH_WORKER_RAW_OUTPUT=1` (`true` and `yes` also work).
+Loop artifacts live under `.loop/orchestrator/`. This repo ignores `.loop/` so loop state, handoffs, and worker transcripts stay local unless a project explicitly chooses to track them. When `.loop/` is tracked, `worker-output.jsonl` is the compact committed worker event summary. Raw diagnostic traces such as `worker-output.raw.jsonl` are local-only, ignored by managed `.loop/.gitignore`, and unstaged before commits. Enable raw traces for debugging with `RALPH_WORKER_RAW_OUTPUT=1` (`true` and `yes` also work).
 
 See `docs/protocol.md` for the full state, artifact, commit, worker-output, and schema compatibility protocol.
 
 ## Migration note
 
-Ralph was the previous public name. Use `/loop-*` commands and `subagent_loop_*` tools going forward. The package name, some internal class names, git refs, and the `.ralph/` artifact path remain for compatibility.
+Ralph was the previous public name. Use `/loop-*` commands and `subagent_loop_*` tools going forward. Some internal class names, git refs, and environment variables still use legacy Ralph terminology for compatibility.
 
 ## Test
 
@@ -130,7 +130,7 @@ npm run typecheck
 ## Artifact layout
 
 ```text
-.ralph/orchestrator/loops/<name>/
+.loop/orchestrator/loops/<name>/
 ├─ plan.md
 ├─ state.json
 ├─ decisions.md

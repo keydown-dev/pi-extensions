@@ -41,9 +41,9 @@ test("scripted Subagent Loop adds tests and implementations over three iteration
   assert.match(status, /└─ ✓ #003-add-divide-test-and-implementation Add divide/);
   assert.match(status, /\+\d+ \/ -\d+ · \d+ files/);
 
-  const handoffIn = await fs.readFile(path.join(cwd, ".ralph", "orchestrator", "loops", "math-kata", "iterations", "003", "handoff-in.md"), "utf8");
+  const handoffIn = await fs.readFile(path.join(cwd, ".loop", "orchestrator", "loops", "math-kata", "iterations", "003", "handoff-in.md"), "utf8");
   assert.match(handoffIn, /Todo: 003-add-divide-test-and-implementation\. Add divide test and implementation/);
-  const handoffOut = await fs.readFile(path.join(cwd, ".ralph", "orchestrator", "loops", "math-kata", "iterations", "003", "handoff-out.md"), "utf8");
+  const handoffOut = await fs.readFile(path.join(cwd, ".loop", "orchestrator", "loops", "math-kata", "iterations", "003", "handoff-out.md"), "utf8");
   assert.match(handoffOut, /Added divide test and implementation/);
 
   const refs = (await execFileAsync("git", ["show-ref"], { cwd })).stdout;
@@ -78,7 +78,7 @@ console.log(JSON.stringify({ type: "message_end", message: { role: "assistant", 
   const state = await ralph.start({ name: "commit-subject-demo", todos: ["Touch math module"] });
   const finalState = await ralph.run("commit-subject-demo", { maxIterations: 1 });
 
-  assert.match(await fs.readFile(path.join(cwd, ".ralph", "orchestrator", "loops", state.name, "iterations", "001", "handoff-in.md"), "utf8"), /## Commit subject/);
+  assert.match(await fs.readFile(path.join(cwd, ".loop", "orchestrator", "loops", state.name, "iterations", "001", "handoff-in.md"), "utf8"), /## Commit subject/);
   assert.equal(finalState.iterations[0]?.commitSubject, "feat: touch math from fake pi");
   const log = (await execFileAsync("git", ["log", "--format=%s"], { cwd })).stdout;
   assert.match(log, /feat: touch math from fake pi/);
@@ -119,7 +119,7 @@ console.log(JSON.stringify({ type: "message_end", message: { role: "assistant", 
   const state = await ralph.start({ name: "compact-output-demo", todos: ["Touch math module"] });
   await ralph.run("compact-output-demo", { maxIterations: 1 });
 
-  const iterationDir = path.join(cwd, ".ralph", "orchestrator", "loops", state.name, "iterations", "001");
+  const iterationDir = path.join(cwd, ".loop", "orchestrator", "loops", state.name, "iterations", "001");
   const compact = await fs.readFile(path.join(iterationDir, "worker-output.jsonl"), "utf8");
   const compactRecords = compact.trim().split("\n").map((line) => JSON.parse(line));
   assert.deepEqual(compactRecords.map((record) => record.type), ["worker_start", "worker_process", "tool_call", "assistant_message", "worker_exit", "worker_result"]);
@@ -349,7 +349,7 @@ test("insertTodo requires a semantic ID and inserts at an array index", async (t
 
   persisted = await ralph.status("insert-demo");
   assert.deepEqual(persisted.todos.map((todo) => todo.id), ["001-first", "001.1-extra-work", "002-second", "003-third"]);
-  const plan = await fs.readFile(path.join(cwd, ".ralph", "orchestrator", "loops", "insert-demo", "plan.md"), "utf8");
+  const plan = await fs.readFile(path.join(cwd, ".loop", "orchestrator", "loops", "insert-demo", "plan.md"), "utf8");
   assert.match(plan, /- \[ \] 001-first\. First \(queued\)\n- \[ \] 001\.1-extra-work\. Iteration 1\.1: Extra work \(deferred\)\n- \[ \] 002-second\. Second \(queued\)/);
 });
 
@@ -359,7 +359,7 @@ test("insertTodo refuses to modify a loop with running work", async (t) => {
   const ralph = new RalphOrchestrator(cwd);
   const state = await ralph.start({ name: "insert-running-demo", todos: ["First", "Second"] });
   state.todos[0]!.status = "running";
-  await fs.writeFile(path.join(cwd, ".ralph", "orchestrator", "loops", "insert-running-demo", "state.json"), `${JSON.stringify(state, null, 2)}\n`, "utf8");
+  await fs.writeFile(path.join(cwd, ".loop", "orchestrator", "loops", "insert-running-demo", "state.json"), `${JSON.stringify(state, null, 2)}\n`, "utf8");
 
   await assert.rejects(() => ralph.insertTodo({ name: "insert-running-demo", id: "001.1-extra", insertAtIndex: 1, title: "Extra" }), /while loop is running/);
 });
@@ -380,7 +380,7 @@ test("insertTodo rejects insertion before completed work", async (t) => {
   const ralph = new RalphOrchestrator(cwd);
   const state = await ralph.start({ name: "insert-complete-demo", todos: ["First", "Second", "Third"] });
   state.todos[0]!.status = "complete";
-  await fs.writeFile(path.join(cwd, ".ralph", "orchestrator", "loops", "insert-complete-demo", "state.json"), `${JSON.stringify(state, null, 2)}\n`, "utf8");
+  await fs.writeFile(path.join(cwd, ".loop", "orchestrator", "loops", "insert-complete-demo", "state.json"), `${JSON.stringify(state, null, 2)}\n`, "utf8");
 
   await assert.rejects(() => ralph.insertTodo({ name: "insert-complete-demo", id: "000-extra", insertAtIndex: 0, title: "Extra" }), /before completed work/);
   const result = await ralph.insertTodo({ name: "insert-complete-demo", id: "001.1-extra", insertAtIndex: 1, title: "Extra", dryRun: true });
@@ -393,7 +393,7 @@ test("insertTodo rejects inconsistent completed todo ordering", async (t) => {
   const ralph = new RalphOrchestrator(cwd);
   const state = await ralph.start({ name: "insert-inconsistent-demo", todos: ["First", "Second", "Third"] });
   state.todos[1]!.status = "complete";
-  await fs.writeFile(path.join(cwd, ".ralph", "orchestrator", "loops", "insert-inconsistent-demo", "state.json"), `${JSON.stringify(state, null, 2)}\n`, "utf8");
+  await fs.writeFile(path.join(cwd, ".loop", "orchestrator", "loops", "insert-inconsistent-demo", "state.json"), `${JSON.stringify(state, null, 2)}\n`, "utf8");
 
   await assert.rejects(() => ralph.insertTodo({ name: "insert-inconsistent-demo", id: "001.1-extra", insertAtIndex: 1, title: "Extra" }), /completed todos.*do not form a prefix/);
 });
@@ -951,10 +951,10 @@ test("diffStats includes untracked files and excludes Ralph artifacts", async (t
   const cwd = await createMathFixture();
   t.after(() => fs.rm(cwd, { recursive: true, force: true }));
   await fs.writeFile(path.join(cwd, "src", "new-op.js"), "export const value = 1;\n", "utf8");
-  await fs.mkdir(path.join(cwd, ".ralph", "scratch"), { recursive: true });
-  await fs.writeFile(path.join(cwd, ".ralph", "scratch", "local.md"), "ignored\n", "utf8");
+  await fs.mkdir(path.join(cwd, ".loop", "scratch"), { recursive: true });
+  await fs.writeFile(path.join(cwd, ".loop", "scratch", "local.md"), "ignored\n", "utf8");
 
-  const stats = await new GitPolicy(cwd).diffStats("HEAD", { excludePrefixes: [".ralph"], includeUntracked: true });
+  const stats = await new GitPolicy(cwd).diffStats("HEAD", { excludePrefixes: [".loop"], includeUntracked: true });
 
   assert.deepEqual(stats, { filesChanged: 1, insertions: 1, deletions: 0 });
 });
@@ -966,7 +966,7 @@ test("declared ignored worker files are counted without being added", async (t) 
   await fs.writeFile(path.join(cwd, ".tmp", "add.ts"), "export const add = (a, b) => a + b;\n", "utf8");
   const git = new GitPolicy(cwd);
 
-  const stats = await git.diffStats("HEAD", { excludePrefixes: [".ralph"], includeUntracked: true, includePaths: [".tmp/add.ts"] });
+  const stats = await git.diffStats("HEAD", { excludePrefixes: [".loop"], includeUntracked: true, includePaths: [".tmp/add.ts"] });
   await git.addAllAndCommit("worker: regular changes only");
 
   assert.deepEqual(stats, { filesChanged: 1, insertions: 1, deletions: 0 });
@@ -974,32 +974,32 @@ test("declared ignored worker files are counted without being added", async (t) 
   assert.equal(tracked, "");
 });
 
-test("orchestrator artifacts are created under ignored .ralph/orchestrator", async (t) => {
+test("orchestrator artifacts are created under ignored .loop/orchestrator", async (t) => {
   const cwd = await createMathFixture();
   t.after(() => fs.rm(cwd, { recursive: true, force: true }));
 
   const ralph = new RalphOrchestrator(cwd);
   await ralph.start({ name: "ignored-artifacts", todos: ["Add subtract test and implementation"] });
 
-  await fs.access(path.join(cwd, ".ralph", "orchestrator", "loops", "ignored-artifacts", "state.json"));
-  const ralphGitignore = await fs.readFile(path.join(cwd, ".ralph", ".gitignore"), "utf8");
+  await fs.access(path.join(cwd, ".loop", "orchestrator", "loops", "ignored-artifacts", "state.json"));
+  const ralphGitignore = await fs.readFile(path.join(cwd, ".loop", ".gitignore"), "utf8");
   assert.match(ralphGitignore, /worker-output\.raw\.jsonl/);
   assert.match(ralphGitignore, /worker-output\.raw\.jsonl\.\*/);
-  const trackedArtifacts = (await execFileAsync("git", ["ls-files", ".ralph", ".ralph-orchestrator"], { cwd })).stdout.trim();
+  const trackedArtifacts = (await execFileAsync("git", ["ls-files", ".loop", ".loop-orchestrator"], { cwd })).stdout.trim();
   assert.equal(trackedArtifacts, "");
 });
 
 test("loop gitignore generation is idempotent and preserves custom rules", async (t) => {
   const cwd = await createMathFixture();
   t.after(() => fs.rm(cwd, { recursive: true, force: true }));
-  await fs.mkdir(path.join(cwd, ".ralph"), { recursive: true });
-  await fs.writeFile(path.join(cwd, ".ralph", ".gitignore"), "custom-local-file\nworker-output.raw.jsonl\n", "utf8");
+  await fs.mkdir(path.join(cwd, ".loop"), { recursive: true });
+  await fs.writeFile(path.join(cwd, ".loop", ".gitignore"), "custom-local-file\nworker-output.raw.jsonl\n", "utf8");
 
   const ralph = new RalphOrchestrator(cwd);
   await ralph.start({ name: "gitignore-idempotent", todos: ["Add subtract test and implementation"] });
   await ralph.run("gitignore-idempotent", { maxIterations: 1, workerMode: "scripted" });
 
-  const ralphGitignore = await fs.readFile(path.join(cwd, ".ralph", ".gitignore"), "utf8");
+  const ralphGitignore = await fs.readFile(path.join(cwd, ".loop", ".gitignore"), "utf8");
   assert.match(ralphGitignore, /^custom-local-file$/m);
   assert.equal((ralphGitignore.match(/^worker-output\.raw\.jsonl$/gm) ?? []).length, 1);
   assert.equal((ralphGitignore.match(/^worker-output\.raw\.jsonl\.\*$/gm) ?? []).length, 1);
@@ -1008,7 +1008,7 @@ test("loop gitignore generation is idempotent and preserves custom rules", async
 test("tracked ralph artifacts commit compact output but exclude raw traces", async (t) => {
   const cwd = await createMathFixture();
   t.after(() => fs.rm(cwd, { recursive: true, force: true }));
-  await fs.writeFile(path.join(cwd, ".gitignore"), ".ralph-orchestrator/\n.tmp/\n", "utf8");
+  await fs.writeFile(path.join(cwd, ".gitignore"), ".loop-orchestrator/\n.tmp/\n", "utf8");
   await execFileAsync("git", ["add", "-A"], { cwd });
   await execFileAsync("git", ["commit", "-m", "track ralph artifacts"], { cwd });
 
@@ -1041,11 +1041,11 @@ console.log(JSON.stringify({ type: "message_end", message: { role: "assistant", 
   const state = await ralph.start({ name: "tracked-artifacts", todos: ["Touch math module"] });
   await ralph.run("tracked-artifacts", { maxIterations: 1 });
 
-  const tracked = (await execFileAsync("git", ["ls-files", ".ralph"], { cwd })).stdout;
-  assert.match(tracked, /\.ralph\/.gitignore/);
+  const tracked = (await execFileAsync("git", ["ls-files", ".loop"], { cwd })).stdout;
+  assert.match(tracked, /\.loop\/.gitignore/);
   assert.match(tracked, /worker-output\.jsonl/);
   assert.doesNotMatch(tracked, /worker-output\.raw\.jsonl/);
-  await fs.access(path.join(cwd, ".ralph", "orchestrator", "loops", state.name, "iterations", "001", "worker-output.raw.jsonl"));
+  await fs.access(path.join(cwd, ".loop", "orchestrator", "loops", state.name, "iterations", "001", "worker-output.raw.jsonl"));
 });
 
 function escapeRegExp(input: string): string {
@@ -1083,7 +1083,7 @@ async function createMathFixture(): Promise<string> {
   await fs.writeFile(path.join(cwd, "package.json"), JSON.stringify({ type: "module", scripts: { test: "node --test" } }, null, 2), "utf8");
   await fs.writeFile(path.join(cwd, "src", "math.js"), "export function add(a, b) {\n  return a + b;\n}\n", "utf8");
   await fs.writeFile(path.join(cwd, "test", "math.test.js"), "import test from 'node:test';\nimport assert from 'node:assert/strict';\nimport { add } from '../src/math.js';\n\ntest('add', () => {\n  assert.equal(add(2, 3), 5);\n});\n", "utf8");
-  await fs.writeFile(path.join(cwd, ".gitignore"), ".ralph/\n.ralph-orchestrator/\n.tmp/\n", "utf8");
+  await fs.writeFile(path.join(cwd, ".gitignore"), ".loop/\n.loop-orchestrator/\n.tmp/\n", "utf8");
   await execFileAsync("git", ["init"], { cwd });
   await execFileAsync("git", ["config", "user.email", "ralph@example.test"], { cwd });
   await execFileAsync("git", ["config", "user.name", "Ralph Test"], { cwd });

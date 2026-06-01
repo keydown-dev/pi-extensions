@@ -23,7 +23,7 @@ export class RalphOrchestrator {
     const name = slugifyLoopName(options.name);
     await this.git.assertRepo();
     if (await this.store.exists(name)) throw new Error(`Ralph loop already exists: ${name}`);
-    await this.git.assertCleanWorktree({ ignorePrefixes: [".ralph"] });
+    await this.git.assertCleanWorktree({ ignorePrefixes: [".loop"] });
 
     const branch = orchestrationBranch(name);
     await this.git.checkoutBranch(branch);
@@ -136,7 +136,7 @@ export class RalphOrchestrator {
     const state = await this.store.readState(slugifyLoopName(name));
     const killed = killRalphWorkerProcesses(state.name);
     state.control = "paused";
-    const hasWorkerChanges = (await this.git.changedPaths()).some((filePath) => !filePath.startsWith(".ralph/"));
+    const hasWorkerChanges = (await this.git.changedPaths()).some((filePath) => !filePath.startsWith(".loop/"));
     for (const todo of state.todos) {
       if (todo.status === "running") todo.status = hasWorkerChanges ? "interrupted" : "queued";
     }
@@ -144,7 +144,7 @@ export class RalphOrchestrator {
       if (iteration.status === "running") {
         iteration.status = "aborted";
         iteration.completedAt = new Date().toISOString();
-        iteration.diff = { filesChanged: hasWorkerChanges ? (await this.git.changedPaths()).filter((filePath) => !filePath.startsWith(".ralph/")).length : 0, insertions: 0, deletions: 0 };
+        iteration.diff = { filesChanged: hasWorkerChanges ? (await this.git.changedPaths()).filter((filePath) => !filePath.startsWith(".loop/")).length : 0, insertions: 0, deletions: 0 };
         iteration.verification = {
           status: "failed",
           commands: [{ command: "loop-kill", exitCode: killed > 0 ? 143 : 0, summary: hasWorkerChanges ? "Worker killed; partial edits may remain" : "Worker killed; no worktree edits detected" }],
@@ -161,7 +161,7 @@ export class RalphOrchestrator {
     const state = await this.store.readState(slify(name));
     if (state.control === "paused") throw new Error(`Loop is paused: ${state.name}. Use /loop-run ${state.name} to resume and run queued work.`);
     if (state.todos.some((todo) => todo.status === "failed" || todo.status === "interrupted")) throw new Error(`Loop needs attention before running: ${state.name}`);
-    await this.git.assertCleanWorktree({ ignorePrefixes: [".ralph"] });
+    await this.git.assertCleanWorktree({ ignorePrefixes: [".loop"] });
 
     const workerMode = options.workerMode ?? "pi-json";
     const worker = workerMode === "scripted" ? new ScriptedMathWorker() : new PiJsonWorkerRunner();
@@ -216,7 +216,7 @@ export class RalphOrchestrator {
     }, forwardWorkerProgress);
 
     result.changedFiles = result.changedFiles.length > 0 ? result.changedFiles : await this.git.changedPaths();
-    iteration.diff = await this.git.diffStats("HEAD", { excludePrefixes: [".ralph"], includeUntracked: true });
+    iteration.diff = await this.git.diffStats("HEAD", { excludePrefixes: [".loop"], includeUntracked: true });
     iteration.usage = result.usage;
     if (result.model) {
       iteration.observedModel = result.model;

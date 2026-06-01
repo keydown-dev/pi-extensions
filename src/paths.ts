@@ -1,6 +1,6 @@
 import path from "node:path";
 
-export const ROOT_DIR = path.join(".ralph", "orchestrator");
+export const ROOT_DIR = path.join(".loop", "orchestrator");
 
 export function slugifyLoopName(name: string): string {
   const slug = name.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");

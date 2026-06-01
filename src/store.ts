@@ -158,10 +158,10 @@ function renderVerification(verification: VerificationRecord): string {
   return lines.join("\n");
 }
 
-const RALPH_ARTIFACT_GITIGNORE = `# Ralph-managed local diagnostics\nworker-output.raw.jsonl\nworker-output.raw.jsonl.*\n*.raw.jsonl\n*.raw.jsonl.*\n`;
+const RALPH_ARTIFACT_GITIGNORE = `# Loop-managed local diagnostics\nworker-output.raw.jsonl\nworker-output.raw.jsonl.*\n*.raw.jsonl\n*.raw.jsonl.*\n`;
 
 async function ensureRalphArtifactGitignore(cwd: string): Promise<void> {
-  const root = path.join(cwd, ".ralph");
+  const root = path.join(cwd, ".loop");
   const gitignorePath = path.join(root, ".gitignore");
   await fs.mkdir(root, { recursive: true });
   let existing = "";

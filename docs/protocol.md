@@ -17,19 +17,19 @@ Physical iteration numbers remain numeric and chronological. Iteration directori
 
 ## Artifact root
 
-Loop artifacts live under the legacy `.ralph/orchestrator/loops/<loop>/` directory. Projects usually ignore `.ralph/` so local loop state, handoffs, and worker transcripts stay local by default. If a project chooses to track `.ralph/`, raw diagnostic traces remain local-only ignored files.
+Loop artifacts live under `.loop/orchestrator/loops/<loop>/`. Projects usually ignore `.loop/` so local loop state, handoffs, and worker transcripts stay local by default. If a project chooses to track `.loop/`, raw diagnostic traces remain local-only ignored files.
 
-The extension creates or updates `.ralph/.gitignore` with managed diagnostic rules:
+The extension creates or updates `.loop/.gitignore` with managed diagnostic rules:
 
 ```gitignore
-# Ralph-managed local diagnostics
+# Loop-managed local diagnostics
 worker-output.raw.jsonl
 worker-output.raw.jsonl.*
 *.raw.jsonl
 *.raw.jsonl.*
 ```
 
-The generator is idempotent and preserves custom rules already present in `.ralph/.gitignore`.
+The generator is idempotent and preserves custom rules already present in `.loop/.gitignore`.
 
 ## Required iteration files
 
@@ -54,8 +54,8 @@ Optional local-only diagnostics:
 - Each iteration first commits handoff context before the worker starts. This commit is the assignment/context boundary and uses `handoff: <todo-id> context`.
 - Each completed iteration then commits worker changes and artifacts after verification is captured. This commit is the result boundary.
 - Worker commits use the worker-provided `## Commit subject` from `handoff-out.md` when it is valid; otherwise they fall back to `worker: <todo-id> changes`.
-- Displayed diff stats are computed from code changes since the handoff commit, excluding `.ralph/` artifacts.
-- Raw trace files under `.ralph/` are unstaged before commit even when `.ralph/` is tracked.
+- Displayed diff stats are computed from code changes since the handoff commit, excluding `.loop/` artifacts.
+- Raw trace files under `.loop/` are unstaged before commit even when `.loop/` is tracked.
 
 Commit subject rules:
 

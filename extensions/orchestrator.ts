@@ -995,7 +995,7 @@ function renderIterationSummary(event: IterationCompleteEvent): string {
 }
 
 function iterationArtifacts(state: LoopState): Record<string, string> {
-  const base = path.join(".ralph", "orchestrator", "loops", state.name);
+  const base = path.join(".loop", "orchestrator", "loops", state.name);
   const artifacts: Record<string, string> = { loopDir: base, plan: path.join(base, "plan.md"), state: path.join(base, "state.json") };
   if (state.currentIteration > 0) {
     const iterationDir = path.join(base, "iterations", String(state.currentIteration).padStart(3, "0"));

@@ -1,0 +1,17 @@
+{
+  "name": "@keydown-dev/pi-todos",
+  "version": "0.0.0-placeholder",
+  "private": true,
+  "description": "Todo list Pi extension placeholder.",
+  "type": "module",
+  "keywords": ["pi-package", "pi-extension", "todo"],
+  "license": "MIT",
+  "pi": {
+    "extensions": ["./src/index.ts"]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  }
+}

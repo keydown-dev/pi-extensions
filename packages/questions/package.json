@@ -1,0 +1,17 @@
+{
+  "name": "@keydown-dev/pi-questions",
+  "version": "0.0.0-placeholder",
+  "private": true,
+  "description": "Structured question and answer Pi extension placeholder.",
+  "type": "module",
+  "keywords": ["pi-package", "pi-extension", "questions"],
+  "license": "MIT",
+  "pi": {
+    "extensions": ["./src/index.ts"]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  }
+}

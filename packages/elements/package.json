@@ -2,7 +2,7 @@
   "name": "@keydown-dev/elements",
   "version": "0.0.0-placeholder",
   "private": true,
-  "description": "Shared TUI elements for Keydown Pi extensions."
+  "description": "Shared TUI elements for Keydown Pi extensions.",
   "type": "module",
   "keywords": ["tui", "terminal", "ui", "components"],
   "license": "MIT",

@@ -1,43 +1,20 @@
 {
-  "name": "@keydown-dev/pi-loops",
-  "version": "0.0.1",
-  "description": "Loop orchestration for Pi with optional subagents, git checkpoints, and handoff artifacts.",
+  "name": "keydown-pi-extensions",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Monorepo for Keydown Pi extensions.",
   "type": "module",
-  "keywords": [
-    "pi-package",
-    "pi",
-    "loops",
-    "loop",
-    "orchestrator",
-    "subagent",
-    "subagents",
-    "fresh-context",
-    "ralph",
-    "wiggum",
-    "ralph-loop",
-    "ralph-loops"
+  "workspaces": [
+    "packages/*"
   ],
-  "license": "MIT",
-  "pi": {
-    "extensions": [
-      "./extensions"
-    ],
-    "skills": [
-      "./skills"
-    ]
-  },
   "scripts": {
-    "test": "node --import tsx --test \"tests/*.test.ts\" \".tmp/*.test.ts\"",
-    "typecheck": "tsc --noEmit"
+    "test": "npm --workspace @keydown-dev/pi-loops test",
+    "typecheck": "npm --workspace @keydown-dev/pi-loops run typecheck"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
     "tsx": "^4.19.0",
     "typebox": "^1.0.55",
     "typescript": "^5.8.0"
-  },
-  "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "*",
-    "typebox": "*"
   }
 }

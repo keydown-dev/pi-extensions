@@ -1,0 +1,37 @@
+{
+  "name": "@keydown-dev/pi-loops",
+  "version": "0.0.1",
+  "description": "Loop orchestration for Pi with optional subagents, git checkpoints, and handoff artifacts.",
+  "type": "module",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "loops",
+    "loop",
+    "orchestrator",
+    "subagent",
+    "subagents",
+    "fresh-context",
+    "ralph",
+    "wiggum",
+    "ralph-loop",
+    "ralph-loops"
+  ],
+  "license": "MIT",
+  "pi": {
+    "extensions": [
+      "./extensions"
+    ],
+    "skills": [
+      "./skills"
+    ]
+  },
+  "scripts": {
+    "test": "node --import tsx --test \"tests/*.test.ts\" \".tmp/*.test.ts\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  }
+}

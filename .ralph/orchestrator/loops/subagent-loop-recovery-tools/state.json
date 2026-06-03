@@ -4,7 +4,7 @@
   "branch": "orchestrator/subagent-loop-recovery-tools",
   "currentIteration": 0,
   "createdAt": "2026-06-03T23:31:02.583Z",
-  "updatedAt": "2026-06-03T23:31:02.585Z",
+  "updatedAt": "2026-06-03T23:31:55.815Z",
   "maxIterations": 4,
   "workerDefaults": {
     "contextWindow": 272000
@@ -31,5 +31,10 @@
       "status": "queued"
     }
   ],
-  "iterations": []
+  "iterations": [],
+  "runBudget": {
+    "remaining": 4,
+    "updatedAt": "2026-06-03T23:31:55.815Z",
+    "updatedBy": "orchestrator"
+  }
 }

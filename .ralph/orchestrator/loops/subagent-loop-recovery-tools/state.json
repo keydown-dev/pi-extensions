@@ -2,9 +2,9 @@
   "name": "subagent-loop-recovery-tools",
   "control": "active",
   "branch": "orchestrator/subagent-loop-recovery-tools",
-  "currentIteration": 0,
+  "currentIteration": 1,
   "createdAt": "2026-06-03T23:31:02.583Z",
-  "updatedAt": "2026-06-03T23:31:55.815Z",
+  "updatedAt": "2026-06-03T23:31:56.406Z",
   "maxIterations": 4,
   "workerDefaults": {
     "contextWindow": 272000
@@ -13,7 +13,7 @@
     {
       "id": "001-complete-plans-issues-013-restart-interrupted-lo",
       "title": "Complete plans/issues/013-restart-interrupted-loop-todo.md",
-      "status": "queued"
+      "status": "running"
     },
     {
       "id": "002-complete-plans-issues-014-worker-request-help-to",
@@ -31,10 +31,18 @@
       "status": "queued"
     }
   ],
-  "iterations": [],
+  "iterations": [
+    {
+      "number": 1,
+      "status": "running",
+      "todoId": "001-complete-plans-issues-013-restart-interrupted-lo",
+      "beforeRef": "ralph/subagent-loop-recovery-tools/iter-001-before",
+      "startedAt": "2026-06-03T23:31:56.254Z"
+    }
+  ],
   "runBudget": {
-    "remaining": 4,
-    "updatedAt": "2026-06-03T23:31:55.815Z",
+    "remaining": 3,
+    "updatedAt": "2026-06-03T23:31:56.175Z",
     "updatedBy": "orchestrator"
   }
 }

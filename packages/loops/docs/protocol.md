@@ -157,6 +157,12 @@ Worker responsibilities:
 
 `subagent_loop_assign_todo_model` updates or clears a persisted model override for a future todo. It refuses a `running` todo so callers do not imply that an already-started child worker changed models.
 
+## Todo restart
+
+`subagent_loop_restart` and `/loop-restart [name] [--todo TODO_ID] [--dry-run]` recover from `failed` or `interrupted` todos by discarding the current visible attempt and retrying the original todo from scratch. Restart is intentionally not a continue/resume primitive; continue-like recovery should be represented by inserting a resolution subtask instead.
+
+A dry run reports the selected loop/todo, latest iteration for that todo, `beforeRef`, current `HEAD`, the rescue ref that would be created, whether the worktree is dirty, and whether resolution subtasks block restart. A real restart refuses running loops, todos without `failed`/`interrupted` status, missing `beforeRef`s, and todos with resolution subtasks. It creates a rescue ref at current `HEAD`, runs `git reset --hard` to the iteration `beforeRef`, marks the same todo `queued`, clears the active run budget/blocking state, preserves historical iteration records, writes state/plan updates, and returns the next action: run one fresh iteration with `/loop-run --max 1` or `subagent_loop_run({ maxIterations: 1 })`.
+
 ## Run-limit behavior
 
 `/loop-start --max N` creates the first `N` tasks as `queued` and the rest as `deferred`.
@@ -172,5 +178,6 @@ Use `/loop-run --max 1` for a single worker iteration. There is no `/loop-next` 
 - **Pause** is soft: set control to `paused`, clear the active run budget, and defer queued work. If a worker is already running, it is allowed to finish the active iteration, and the orchestrator does not start another iteration.
 - **Resume** is not a command. Running again with `/loop-run` sets control to `active` and starts fresh worker iterations for queued work.
 - **Kill** is hard: send `SIGTERM` to active child worker processes for that loop and set control to `paused`. If non-loop worktree changes are detected, the active task becomes `interrupted`; otherwise it may return to `queued`. The killed child session cannot be resumed in-place. Inspect Subagent Loop status and `git status` before running again.
+- **Restart** is destructive retry: create a rescue ref, reset hard to the failed/interrupted todo's `beforeRef`, requeue that same todo, and then run one fresh iteration. Dry-run restart before the reset unless the user explicitly requested immediate restart.
 
 Removed command/tool surface: stop, resume, next, and ralph-control. Legacy `/ralph-*` commands and `ralph_orchestrator_*` tools have been replaced by `/loop-*` and `subagent_loop_*`.

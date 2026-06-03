@@ -6,7 +6,7 @@ import { slugifyLoopName } from "./paths.js";
 import { killRalphWorkerProcesses, PiJsonWorkerRunner } from "./pi-json-worker.js";
 import { ScriptedMathWorker } from "./scripted-worker.js";
 import { RalphStore } from "./store.js";
-import type { AssignTodoModelOptions, AssignTodoModelResult, DerivedLoopStatus, InsertTodoOptions, InsertTodoResult, IterationState, LoopState, RalphTodo, RunOptions, StartOptions, WorkerProgress } from "./types.js";
+import type { AssignTodoModelOptions, AssignTodoModelResult, DerivedLoopStatus, InsertTodoOptions, InsertTodoResult, IterationState, LoopState, RalphTodo, RestartTodoOptions, RestartTodoResult, RunOptions, StartOptions, WorkerProgress } from "./types.js";
 
 const DEFAULT_TODOS = ["Add subtract test and implementation", "Add multiply test and implementation", "Add divide test and implementation"];
 
@@ -130,6 +130,54 @@ export class RalphOrchestrator {
       await this.git.addAllAndCommit(`orchestrator: pause ${state.name}`);
     }
     return state;
+  }
+
+  async restartTodo(options: RestartTodoOptions): Promise<RestartTodoResult> {
+    const state = await this.store.readState(slugifyLoopName(options.name));
+    if (state.todos.some((todo) => todo.status === "running") || state.iterations.some((iteration) => iteration.status === "running")) {
+      throw new Error(`Cannot restart a loop todo while loop is running: ${state.name}. Pause or wait for the active worker to finish first.`);
+    }
+
+    const todo = selectRestartTodo(state, options.todoId);
+    if (todo.status !== "failed" && todo.status !== "interrupted") throw new Error(`Ralph todo is not failed or interrupted in ${state.name}: ${todo.id}`);
+    if (hasResolutionSubtasks(state, todo.id)) throw new Error(`Cannot restart ${todo.id} because it has resolution subtasks. Continue-like recovery should use the subtask instead.`);
+
+    const iteration = latestIterationForTodo(state, todo.id);
+    if (!iteration) throw new Error(`No iteration history found for todo ${todo.id} in ${state.name}.`);
+    const before = iteration.beforeRef;
+    if (!(await this.git.refExists(before))) throw new Error(`Cannot restart ${todo.id}: beforeRef does not exist: ${before}`);
+
+    const head = await this.git.headRef();
+    const rescueRef = restartRescueRef(state.name, todo.id);
+    const worktreeDirty = await this.git.isWorktreeDirty({ ignorePrefixes: [".loop"] });
+    const nextState: LoopState = {
+      ...state,
+      control: "active",
+      runBudget: undefined,
+      todos: state.todos.map((item) => (String(item.id) === String(todo.id) ? { ...item, status: "queued" } : item)),
+      iterations: [...state.iterations],
+    };
+    const nextTodo = nextState.todos.find((item) => String(item.id) === String(todo.id));
+    if (!nextTodo) throw new Error(`Ralph todo disappeared during restart planning: ${todo.id}`);
+
+    if (!options.dryRun) {
+      await this.git.createRef(rescueRef, "HEAD");
+      await this.git.resetHard(before);
+      await this.store.writeState(nextState);
+      await this.git.addAllAndCommit(`orchestrator: restart ${todo.id} in ${state.name}`);
+    }
+
+    return {
+      state: nextState,
+      todo: nextTodo,
+      iteration,
+      beforeRef: before,
+      headRef: head,
+      rescueRef,
+      worktreeDirty,
+      dryRun: options.dryRun ?? false,
+      nextAction: `Run /loop-run ${state.name} --max 1 or subagent_loop_run({ name: "${state.name}", maxIterations: 1 }) to retry ${todo.id}.`,
+    };
   }
 
   async kill(name: string): Promise<{ state: LoopState; killed: number }> {
@@ -312,6 +360,30 @@ function slify(name: string): string {
   return slugifyLoopName(name);
 }
 
+function selectRestartTodo(state: LoopState, requestedTodoId: string | undefined): RalphTodo {
+  if (requestedTodoId) {
+    const todo = state.todos.find((item) => String(item.id) === String(requestedTodoId));
+    if (!todo) throw new Error(`Ralph todo not found in ${state.name}: ${requestedTodoId}`);
+    return todo;
+  }
+
+  const candidates = state.todos.filter((todo) => todo.status === "failed" || todo.status === "interrupted");
+  if (candidates.length === 0) throw new Error(`No failed or interrupted todo exists in ${state.name}.`);
+  if (candidates.length > 1) throw new Error(`Multiple failed/interrupted todos exist in ${state.name}; pass todoId. Candidates: ${candidates.map((todo) => todo.id).join(", ")}`);
+  return candidates[0]!;
+}
+
+function hasResolutionSubtasks(state: LoopState, todoId: RalphTodo["id"]): boolean {
+  const prefix = `${String(todoId)}.`;
+  return state.todos.some((todo) => String(todo.id).startsWith(prefix));
+}
+
+function restartRescueRef(loopName: string, todoId: RalphTodo["id"]): string {
+  const safeTodoId = String(todoId).replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "todo";
+  const timestamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+  return `ralph/${loopName}/restart-rescue-${safeTodoId}-${timestamp}`;
+}
+
 function deferQueuedTodos(state: LoopState): void {
   for (const todo of state.todos) {
     if (todo.status === "queued") todo.status = "deferred";
@@ -440,7 +512,7 @@ function statusIcon(status: DerivedLoopStatus): string {
 function latestIterationForTodo(state: LoopState, todoId: RalphTodo["id"]): LoopState["iterations"][number] | undefined {
   for (let index = state.iterations.length - 1; index >= 0; index--) {
     const iteration = state.iterations[index];
-    if (iteration?.todoId === todoId) return iteration;
+    if (String(iteration?.todoId) === String(todoId)) return iteration;
   }
   return undefined;
 }

@@ -4,7 +4,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Type } from "typebox";
 import { deriveLoopStatus, RalphOrchestrator, renderLoopList, renderStatus } from "../src/orchestrator.js";
 import { slugifyLoopName } from "../src/paths.js";
-import type { InsertTodoResult, IterationCompleteEvent, LoopState, OrchestratorProgress, WorkerMode, WorkerProgress, WorkerUsage } from "../src/types.js";
+import type { InsertTodoResult, IterationCompleteEvent, LoopState, OrchestratorProgress, RestartTodoResult, WorkerMode, WorkerProgress, WorkerUsage } from "../src/types.js";
 
 let currentLoop: string | null = null;
 type RalphWidgetMode = "compact" | "expanded" | "hidden";
@@ -137,6 +137,19 @@ export default function (pi: ExtensionAPI) {
     ctx.ui.notify(`Killed ${killed} Subagent Loop worker process${killed === 1 ? "" : "es"} for ${state.name}. Inspect status and git status before running again.`, killed > 0 ? "warning" : "info");
   }
 
+  async function restartLoop(args: string, ctx: ExtensionContext): Promise<void> {
+    const argv = splitArgs(args);
+    const dryRun = argv.includes("--dry-run");
+    const todoId = parseTodoId(argv);
+    const name = argv.find((arg) => !arg.startsWith("--") && arg !== todoId) ?? currentLoop;
+    if (!name) throw new Error("Usage: /loop-restart [name] [--todo TODO_ID] [--dry-run]");
+    const loopName = slugifyLoopName(name);
+    if (activeJobs.has(loopName)) throw new Error(`Cannot restart a loop todo while loop is running: ${loopName}. Pause or wait for the active worker to finish first.`);
+    const result = await new RalphOrchestrator(ctx.cwd, packageRoot).restartTodo({ name: loopName, todoId, dryRun });
+    if (!result.dryRun) updateUI(ctx, result.state);
+    ctx.ui.notify(renderRestartTodoResponse(result), result.dryRun ? "info" : "warning");
+  }
+
   async function showStatus(args: string, ctx: ExtensionContext): Promise<void> {
     const name = splitArgs(args).shift();
     const orchestrator = new RalphOrchestrator(ctx.cwd, packageRoot);
@@ -218,6 +231,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("loop-start", command("Start a Subagent Loop", startLoop));
   pi.registerCommand("loop-pause", command("Pause active Subagent Loop", pauseLoop));
   pi.registerCommand("loop-kill", command("Kill active Subagent Loop worker process and pause the loop", killLoop));
+  pi.registerCommand("loop-restart", command("Restart an interrupted or failed loop todo from its before ref", restartLoop));
   pi.registerCommand("loop-status", command("Show current or named Subagent Loop status", showStatus));
   pi.registerCommand("loop-list", command("List Subagent Loops", showList));
   pi.registerCommand("loop-run", command("Run one or more Subagent Loop worker iterations", runLoop));
@@ -261,6 +275,7 @@ export default function (pi: ExtensionAPI) {
         if (subcommand === "assign-model") return assignTodoModel(argv.join(" "), ctx);
         if (subcommand === "pause") return pauseLoop(argv.join(" "), ctx);
         if (subcommand === "kill") return killLoop(argv.join(" "), ctx);
+        if (subcommand === "restart") return restartLoop(argv.join(" "), ctx);
         if (subcommand === "status") return showStatus(argv.join(" "), ctx);
         if (subcommand === "list") return showList(argv.join(" "), ctx);
         if (subcommand === "widget") return toggleWidget(argv.join(" "), ctx);
@@ -415,6 +430,27 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.registerTool({
+    name: "subagent_loop_restart",
+    label: "Restart Loop Todo",
+    description: "Restart an interrupted or failed Subagent Loop todo from its saved beforeRef after creating a rescue ref.",
+    promptSnippet: "Dry-run restart before destructive reset unless the user explicitly asked for immediate restart.",
+    parameters: Type.Object({
+      name: Type.Optional(Type.String({ description: "Loop name. Defaults to the current active loop when available." })),
+      todoId: Type.Optional(Type.String({ description: "Todo ID to restart. Required when multiple failed/interrupted todos exist." })),
+      dryRun: Type.Optional(Type.Boolean({ description: "Preview selected todo, beforeRef, rescue ref, dirty state, and blockers without mutating git or state." })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const name = params.name ?? currentLoop;
+      if (!name) throw new Error("No Subagent Loop name provided and no active loop is set.");
+      const loopName = slugifyLoopName(name);
+      if (activeJobs.has(loopName)) throw new Error(`Cannot restart a loop todo while loop is running: ${loopName}. Pause or wait for the active worker to finish first.`);
+      const result = await new RalphOrchestrator(ctx.cwd, packageRoot).restartTodo({ name: loopName, todoId: params.todoId, dryRun: params.dryRun });
+      if (!result.dryRun) updateUI(ctx, result.state);
+      return { content: [{ type: "text", text: renderRestartTodoResponse(result) }], details: { ...result, nextAction: result.dryRun ? "If the preview looks correct and the user approves discarding the current attempt, call subagent_loop_restart again with dryRun false or omitted." : result.nextAction } };
+    },
+  });
+
+  pi.registerTool({
     name: "subagent_loop_status",
     label: "Subagent Loop Status",
     description: "Inspect status for the active or named Subagent Loop.",
@@ -479,6 +515,7 @@ Primary commands:
   /loop-assign-model <loop> <todo-id> [--model MODEL] Assign/clear future todo worker model
   /loop-pause [name]                              Pause after the current worker exits
   /loop-kill [name]                               Kill the current Subagent Loop worker process and pause
+  /loop-restart [name] [--todo ID] [--dry-run]    Reset to a failed/interrupted todo's before ref and retry it
   /loop-status [name]                             Show current or named loop status
   /loop-list                                      List all loops
   /loop-widget [toggle|compact|expand|show|hide] Set Subagent Loop widget mode (Ctrl+Opt+R expands/contracts)
@@ -513,6 +550,12 @@ function parseRunnerValue(value: string | undefined): WorkerMode {
 
 function parseModel(args: string[]): string | undefined {
   const index = args.indexOf("--model");
+  if (index === -1) return undefined;
+  return args[index + 1];
+}
+
+function parseTodoId(args: string[]): string | undefined {
+  const index = args.indexOf("--todo");
   if (index === -1) return undefined;
   return args[index + 1];
 }
@@ -564,6 +607,11 @@ function renderInsertTodoResponse(result: InsertTodoResult): string {
     .map((todo) => `#${todo.id}`)
     .join(", ");
   return `${action} loop todo #${result.insertedTodo.id} at index ${result.insertAtIndex}: ${result.insertedTodo.title}\n\nChanges:\n- status: ${result.insertedTodo.status}\n- existing todo IDs preserved: ${preserved || "none"}${maxChange}\n\n${renderStatus(result.state)}\n\nNext action: ${result.dryRun ? "Review the preview, then insert without dryRun if approved." : nextActionForState(result.state)}`;
+}
+
+function renderRestartTodoResponse(result: RestartTodoResult): string {
+  const action = result.dryRun ? "Dry run: would restart" : "Restarted";
+  return `${action} loop todo #${result.todo.id}: ${result.todo.title}\n\nRestart target:\n- loop: ${result.state.name}\n- latest iteration: ${String(result.iteration.number).padStart(3, "0")} (${result.iteration.status})\n- beforeRef: ${result.beforeRef}\n- current HEAD: ${result.headRef}\n- rescue ref: ${result.rescueRef}\n- worktree dirty: ${result.worktreeDirty ? "yes" : "no"}\n- resolution subtasks: no\n\n${renderStatus(result.state)}\n\nNext action: ${result.dryRun ? "Review the rescue ref and beforeRef, then restart without --dry-run if approved." : result.nextAction}`;
 }
 
 type RalphTheme = ExtensionContext["ui"]["theme"];
@@ -959,7 +1007,7 @@ function nextActionForState(state: LoopState): string {
   if (status === "ready") return `Loop is ready. Use subagent_loop_run or /loop-run ${state.name} --max N.`;
   if (status === "running") return `Loop is running. Chat to pause, kill, or steer the orchestrator.`;
   if (status === "completed") return "Loop is complete. Inspect artifacts or start a new loop.";
-  if (status === "needs_attention") return "Loop needs attention. Inspect status and git status before running again.";
+  if (status === "needs_attention") return `Loop needs attention. Inspect status and git status, or dry-run /loop-restart ${state.name} before discarding the current attempt.`;
   return `Loop is paused. Run it again with /loop-run ${state.name} when ready.`;
 }
 

@@ -38,8 +38,34 @@ export class GitPolicy {
     else await this.run(["checkout", "-b", branch]);
   }
 
-  async createRef(ref: string): Promise<void> {
-    await this.run(["update-ref", `refs/${ref}`, "HEAD"]);
+  async createRef(ref: string, target = "HEAD"): Promise<void> {
+    await this.run(["update-ref", `refs/${ref}`, target]);
+  }
+
+  async refExists(ref: string): Promise<boolean> {
+    try {
+      await this.run(["rev-parse", "--verify", "--quiet", `refs/${ref}^{commit}`]);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async headRef(): Promise<string> {
+    return this.run(["rev-parse", "HEAD"]);
+  }
+
+  async isWorktreeDirty(options: { ignorePrefixes?: string[] } = {}): Promise<boolean> {
+    const status = await this.run(["status", "--porcelain"], { trim: false });
+    return status
+      .split("\n")
+      .map((line) => line.trimEnd())
+      .filter(Boolean)
+      .some((line) => !isIgnoredStatusLine(line, options.ignorePrefixes ?? []));
+  }
+
+  async resetHard(ref: string): Promise<void> {
+    await this.run(["reset", "--hard", `refs/${ref}`]);
   }
 
   async captureStatus(): Promise<string> {

@@ -35,6 +35,7 @@ The monorepo root manifest points at this package's extension and skill director
 | `/loop-run [name] [--max N] [--runner pi-json\|scripted] [--model MODEL]` | Run queued work in the background. If paused, this resumes the loop. If already running, this queues `N` more persisted run-budget iterations instead of starting a second worker. |
 | `/loop-pause [name]` | Soft pause. A running worker may finish, but the loop will not pick another queued task. |
 | `/loop-kill [name]` | Hard abort active child worker processes, pause the loop, then require inspection before running again. |
+| `/loop-restart [name] [--todo TODO_ID] [--dry-run]` | Restart a failed/interrupted todo by creating a rescue ref, resetting to that attempt's `beforeRef`, and requeueing the same todo. |
 | `/loop-status [name]` | Show loop control, derived status, iteration count, branch, and task progress. |
 | `/loop-list` | List all loops under `.loop/orchestrator/loops/`. |
 | `/loop-widget [toggle\|compact\|expand\|show\|hide]` | Set Subagent Loop widget mode. |
@@ -55,6 +56,7 @@ Agent tools:
 - `subagent_loop_run`
 - `subagent_loop_insert_todo`
 - `subagent_loop_assign_todo_model`
+- `subagent_loop_restart`
 - `subagent_loop_pause`
 - `subagent_loop_kill`
 - `subagent_loop_status`
@@ -98,6 +100,7 @@ Display status is derived:
 - **Pause**: set loop control to `paused`, clear the active run budget, and defer queued work. If a worker is already running, let it finish the current task, then do not start another task.
 - **Resume**: there is no resume command. Running again (`/loop-run`) sets control to `active` and picks queued work.
 - **Kill**: send `SIGTERM` to active child `pi --mode json` workers. The loop is paused. If non-loop worktree changes are detected, the running task becomes `interrupted`; otherwise it can return to `queued`. Inspect loop status and `git status` before running again.
+- **Restart**: for a `failed` or `interrupted` todo, create a rescue ref at current `HEAD`, reset hard to that todo attempt's `beforeRef`, mark the same todo `queued`, and preserve historical iteration records. Restart discards the current visible attempt; use inserted resolution subtasks for continue-like recovery. Dry-run restart first unless the user explicitly asked for an immediate reset.
 
 ## Artifacts, identity, and git policy
 

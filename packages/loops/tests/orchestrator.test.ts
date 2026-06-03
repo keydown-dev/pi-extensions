@@ -408,6 +408,82 @@ test("derived status reports needs attention for interrupted tasks", async (t) =
   assert.equal(deriveLoopStatus(state), "needs_attention");
 });
 
+test("restart dry-run reports target refs and does not mutate state or git", async (t) => {
+  const cwd = await createMathFixture();
+  t.after(() => fs.rm(cwd, { recursive: true, force: true }));
+  const ralph = new RalphOrchestrator(cwd);
+  const state = await prepareInterruptedRestartFixture(cwd, "restart-dry-run-demo");
+  await fs.appendFile(path.join(cwd, "src", "math.js"), "\n// partial dirty edit\n", "utf8");
+  const headBefore = (await execFileAsync("git", ["rev-parse", "HEAD"], { cwd })).stdout.trim();
+
+  const preview = await ralph.restartTodo({ name: state.name, dryRun: true });
+
+  assert.equal(preview.dryRun, true);
+  assert.equal(preview.todo.id, "001-add-subtract-test-and-implementation");
+  assert.equal(preview.beforeRef, "ralph/restart-dry-run-demo/iter-001-before");
+  assert.match(preview.rescueRef, /ralph\/restart-dry-run-demo\/restart-rescue-001-add-subtract-test-and-implementation-/);
+  assert.equal(preview.headRef, headBefore);
+  assert.equal(preview.worktreeDirty, true);
+  assert.equal((await ralph.status(state.name)).todos[0]?.status, "interrupted");
+  assert.equal((await execFileAsync("git", ["rev-parse", "HEAD"], { cwd })).stdout.trim(), headBefore);
+  await assert.rejects(() => execFileAsync("git", ["rev-parse", "--verify", `refs/${preview.rescueRef}`], { cwd }));
+});
+
+test("restart of interrupted todo creates rescue ref, resets, queues todo, and preserves history", async (t) => {
+  const cwd = await createMathFixture();
+  t.after(() => fs.rm(cwd, { recursive: true, force: true }));
+  const ralph = new RalphOrchestrator(cwd);
+  const state = await prepareInterruptedRestartFixture(cwd, "restart-real-demo");
+  const headBefore = (await execFileAsync("git", ["rev-parse", "HEAD"], { cwd })).stdout.trim();
+  const beforeSha = (await execFileAsync("git", ["rev-parse", "refs/ralph/restart-real-demo/iter-001-before"], { cwd })).stdout.trim();
+
+  const result = await ralph.restartTodo({ name: state.name, todoId: "001-add-subtract-test-and-implementation" });
+
+  assert.equal(result.dryRun, false);
+  assert.equal(result.todo.status, "queued");
+  assert.equal(result.state.control, "active");
+  assert.equal(result.state.iterations.length, 1);
+  assert.equal(result.state.iterations[0]?.status, "aborted");
+  assert.equal((await execFileAsync("git", ["rev-parse", `refs/${result.rescueRef}`], { cwd })).stdout.trim(), headBefore);
+  assert.equal((await execFileAsync("git", ["rev-parse", "HEAD"], { cwd })).stdout.trim(), beforeSha);
+  assert.equal((await ralph.status(state.name)).todos[0]?.status, "queued");
+});
+
+test("restart refuses resolution subtasks, no candidates, and missing beforeRef", async (t) => {
+  const cwd = await createMathFixture();
+  t.after(() => fs.rm(cwd, { recursive: true, force: true }));
+  const ralph = new RalphOrchestrator(cwd);
+  const state = await prepareInterruptedRestartFixture(cwd, "restart-refuse-demo");
+  state.todos.push({ id: "001-add-subtract-test-and-implementation.1", title: "Resolution", status: "deferred" });
+  await writeLoopState(cwd, state);
+  await assert.rejects(() => ralph.restartTodo({ name: state.name, todoId: "001-add-subtract-test-and-implementation" }), /resolution subtasks/);
+
+  state.todos.pop();
+  state.todos[0]!.status = "complete";
+  await writeLoopState(cwd, state);
+  await assert.rejects(() => ralph.restartTodo({ name: state.name }), /No failed or interrupted todo/);
+
+  state.todos[0]!.status = "failed";
+  state.iterations[0]!.beforeRef = "ralph/restart-refuse-demo/missing-before";
+  await writeLoopState(cwd, state);
+  await assert.rejects(() => ralph.restartTodo({ name: state.name }), /beforeRef does not exist/);
+});
+
+test("running after restart starts a fresh iteration for the same todo", async (t) => {
+  const cwd = await createMathFixture();
+  t.after(() => fs.rm(cwd, { recursive: true, force: true }));
+  const ralph = new RalphOrchestrator(cwd);
+  const state = await prepareInterruptedRestartFixture(cwd, "restart-rerun-demo");
+
+  await ralph.restartTodo({ name: state.name });
+  const finalState = await ralph.run(state.name, { maxIterations: 1, workerMode: "scripted" });
+
+  assert.equal(finalState.currentIteration, 2);
+  assert.equal(finalState.iterations.length, 2);
+  assert.equal(finalState.iterations[1]?.todoId, "001-add-subtract-test-and-implementation");
+  assert.equal(finalState.todos[0]?.status, "complete");
+});
+
 test("completion callback is emitted before the next iteration starts", async (t) => {
   const cwd = await createMathFixture();
   t.after(() => fs.rm(cwd, { recursive: true, force: true }));
@@ -1075,6 +1151,39 @@ const taggedTheme = {
     return text;
   },
 };
+
+async function prepareInterruptedRestartFixture(cwd: string, name: string) {
+  const ralph = new RalphOrchestrator(cwd);
+  const state = await ralph.start({ name, todos: ["Add subtract test and implementation"] });
+  const git = new GitPolicy(cwd);
+  await git.createRef(`ralph/${state.name}/iter-001-before`);
+  await fs.appendFile(path.join(cwd, "src", "math.js"), "\nexport const interruptedAttempt = true;\n", "utf8");
+  await execFileAsync("git", ["add", "-A"], { cwd });
+  await execFileAsync("git", ["commit", "-m", "worker: interrupted attempt"], { cwd });
+  state.currentIteration = 1;
+  state.control = "paused";
+  state.todos[0]!.status = "interrupted";
+  state.iterations.push({
+    number: 1,
+    status: "aborted",
+    todoId: state.todos[0]!.id,
+    beforeRef: `ralph/${state.name}/iter-001-before`,
+    startedAt: "2026-05-27T00:00:00.000Z",
+    completedAt: "2026-05-27T00:01:00.000Z",
+    verification: { status: "failed", commands: [{ command: "loop-kill", exitCode: 143, summary: "Worker killed" }] },
+  });
+  await writeLoopState(cwd, state);
+  return state;
+}
+
+async function writeLoopState(cwd: string, state: Awaited<ReturnType<RalphOrchestrator["start"]>>): Promise<void> {
+  const loopDir = path.join(cwd, ".loop", "orchestrator", "loops", state.name);
+  await fs.writeFile(path.join(loopDir, "state.json"), `${JSON.stringify(state, null, 2)}\n`, "utf8");
+  const lines = [`# Ralph loop: ${state.name}`, "", `Control: ${state.control}`, "", "## Todo", ""];
+  for (const todo of state.todos) lines.push(`- [${todo.status === "complete" ? "x" : " "}] ${todo.id}. ${todo.title} (${todo.status})`);
+  lines.push("");
+  await fs.writeFile(path.join(loopDir, "plan.md"), lines.join("\n"), "utf8");
+}
 
 async function createMathFixture(): Promise<string> {
   const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "ralph-fixture-"));

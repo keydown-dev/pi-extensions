@@ -43,6 +43,24 @@ export interface AssignTodoModelOptions {
   dryRun?: boolean;
 }
 
+export interface RestartTodoOptions {
+  name: string;
+  todoId?: string;
+  dryRun?: boolean;
+}
+
+export interface RestartTodoResult {
+  state: LoopState;
+  todo: RalphTodo;
+  iteration: IterationState;
+  beforeRef: string;
+  headRef: string;
+  rescueRef: string;
+  worktreeDirty: boolean;
+  dryRun: boolean;
+  nextAction: string;
+}
+
 export interface AssignTodoModelResult {
   state: LoopState;
   todo: RalphTodo;

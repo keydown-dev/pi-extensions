@@ -4,7 +4,7 @@
   "branch": "orchestrator/subagent-loop-recovery-tools",
   "currentIteration": 1,
   "createdAt": "2026-06-03T23:31:02.583Z",
-  "updatedAt": "2026-06-03T23:31:56.406Z",
+  "updatedAt": "2026-06-03T23:42:12.291Z",
   "maxIterations": 4,
   "workerDefaults": {
     "contextWindow": 272000
@@ -13,7 +13,7 @@
     {
       "id": "001-complete-plans-issues-013-restart-interrupted-lo",
       "title": "Complete plans/issues/013-restart-interrupted-loop-todo.md",
-      "status": "running"
+      "status": "complete"
     },
     {
       "id": "002-complete-plans-issues-014-worker-request-help-to",
@@ -34,10 +34,55 @@
   "iterations": [
     {
       "number": 1,
-      "status": "running",
+      "status": "accepted",
       "todoId": "001-complete-plans-issues-013-restart-interrupted-lo",
       "beforeRef": "ralph/subagent-loop-recovery-tools/iter-001-before",
-      "startedAt": "2026-06-03T23:31:56.254Z"
+      "startedAt": "2026-06-03T23:31:56.254Z",
+      "diff": {
+        "filesChanged": 8,
+        "insertions": 292,
+        "deletions": 9
+      },
+      "usage": {
+        "input": 82329,
+        "output": 12395,
+        "cacheRead": 1776640,
+        "cacheWrite": 0,
+        "totalTokens": 1871364,
+        "cost": 1.671815,
+        "contextWindow": 272000,
+        "contextTokens": 72138
+      },
+      "observedModel": "gpt-5.5",
+      "model": "gpt-5.5",
+      "observedProvider": "openai-codex",
+      "provider": "openai-codex",
+      "summary": "Implemented first-class Subagent Loop restart support via `RalphOrchestrator.restartTodo`, `subagent_loop_restart`, and `/loop-restart`. Restart dry-runs report the selected todo/iteration refs, rescue ref, HEAD, and dirty state; real restarts create a rescue ref, hard-reset to the attempt `beforeRef`, requeue the same failed/interrupted todo, and preserve iteration history.",
+      "changedFiles": [
+        "packages/loops/src/types.ts",
+        "packages/loops/src/git.ts",
+        "packages/loops/src/orchestrator.ts",
+        "packages/loops/extensions/orchestrator.ts",
+        "packages/loops/tests/orchestrator.test.ts",
+        "packages/loops/README.md",
+        "packages/loops/docs/protocol.md",
+        "packages/loops/skills/subagent-loop/refs/tool-usage.md",
+        ".ralph/orchestrator/loops/subagent-loop-recovery-tools/iterations/001/verification.md",
+        ".ralph/orchestrator/loops/subagent-loop-recovery-tools/iterations/001/handoff-out.md"
+      ],
+      "commitSubject": "feat: add loop todo restart recovery",
+      "verification": {
+        "status": "passed",
+        "commands": [
+          {
+            "command": "worker-reported verification",
+            "exitCode": 0,
+            "summary": "# Verification\n\nStatus: passed\n\n## Commands\n\n- `npm --workspace @keydown-dev/pi-loops test -- --test-name-pattern restart` → 0: All 48 loop tests passed (the package test runner executed the full suite despite the name-pattern argument).\n- `npm run typecheck` → 0: TypeScript completed with no errors.\n\n## Notes\n\nA prior `npm test` run timed out at 120s after the restart tests failed due to a test fixture committing ignored `.loop` artifacts; the fixture was corrected and the full effective test run passed afterward."
+          }
+        ]
+      },
+      "afterRef": "ralph/subagent-loop-recovery-tools/iter-001-after",
+      "completedAt": "2026-06-03T23:42:12.183Z"
     }
   ],
   "runBudget": {

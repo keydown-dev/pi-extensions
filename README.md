@@ -1,6 +1,6 @@
-# Keydown Pi Extensions
+# Pi Extensions
 
-Monorepo for independently installable Pi extensions.
+Monorepo for Keydown Pi extensions. The root package is `@keydown-dev/pi-extensions` and acts as an aggregator package: installing the monorepo root loads the extension and skill resources listed in the root `package.json` `pi` manifest.
 
 Packages:
 
@@ -16,8 +16,27 @@ npm run typecheck
 npm test
 ```
 
-Install the loop extension from a local checkout with:
+Install from a local checkout with:
+
+```bash
+pi install .
+```
+
+For package-specific local development, you can target an individual package directory:
 
 ```bash
 pi install ./packages/loops
 ```
+
+## Root aggregator manifest
+
+Pi package manifests can point to multiple extension and skill directories. The root package uses this to expose ready extensions from the monorepo as one installable package:
+
+```json
+"pi": {
+  "extensions": ["./packages/loops/extensions"],
+  "skills": ["./packages/loops/skills"]
+}
+```
+
+As more packages become ready, add their resource directories to the root manifest arrays.

@@ -6,7 +6,13 @@ pi-loops creates local loop artifacts, orchestration branches, before/after git 
 
 ## Install
 
-From a local checkout of this repo:
+From the repository root of a local checkout, install the root aggregator package:
+
+```bash
+pi install .
+```
+
+For package-specific local development, target this package directly:
 
 ```bash
 pi install ./packages/loops
@@ -18,7 +24,7 @@ For a one-off trial without adding it to your Pi settings:
 pi -e ./packages/loops
 ```
 
-This package is not published to npm yet. Once published, install it as `npm:@keydown-dev/pi-loops`.
+The monorepo root manifest points at this package's extension and skill directories so the root install loads `packages/loops` alongside any other ready extensions in the monorepo.
 
 ## Command reference
 

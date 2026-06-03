@@ -1,12 +1,24 @@
 # Packages
 
-This directory is the staging area for turning this repository into a monorepo of independently installable Pi extensions.
+This directory contains the monorepo packages for Pi extensions and shared libraries.
 
-Current placeholders:
+Current packages:
 
-- `loops/` — future home of the existing loop package.
-- `questions/` — first-party structured Q&A extension.
-- `todos/` — first-party todo tool/widget extension.
-- `elements/` — shared TUI primitives used by the extensions.
+- `loops/` — `@keydown-dev/pi-loops`, the loop orchestration Pi package.
+- `questions/` — `@keydown-dev/pi-questions`, structured Q&A extension placeholder.
+- `todos/` — `@keydown-dev/pi-todos`, todo tool/widget extension placeholder.
+- `elements/` — `@keydown-dev/elements`, shared TUI primitives used by the extensions.
 
-See `../plans/monorepo-extensions.md` for the migration plan.
+Install the root aggregator package from a local checkout with:
+
+```bash
+pi install .
+```
+
+Install an individual extension package locally by targeting its package directory, for example:
+
+```bash
+pi install ./packages/loops
+```
+
+The monorepo root `package.json` can expose multiple package resource directories through its `pi.extensions` and `pi.skills` arrays.

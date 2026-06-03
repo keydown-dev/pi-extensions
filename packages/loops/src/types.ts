@@ -11,6 +11,15 @@ export interface WorkerModelAssignment {
   contextWindow?: number;
 }
 
+export interface HelpRequestSummary {
+  id: string;
+  iteration: number;
+  question: string;
+  artifactPath: string;
+  createdAt: string;
+  status: "open" | "resolved";
+}
+
 export interface RalphTodo {
   id: RalphTodoId;
   title: string;
@@ -18,6 +27,7 @@ export interface RalphTodo {
   workerModel?: string;
   workerProvider?: string;
   workerContextWindow?: number;
+  helpRequest?: HelpRequestSummary;
 }
 
 export type InsertTodoStatus = "queued" | "deferred";
@@ -47,6 +57,27 @@ export interface RestartTodoOptions {
   name: string;
   todoId?: string;
   dryRun?: boolean;
+}
+
+export interface RequestHelpOptions {
+  name?: string;
+  question: string;
+  context?: string;
+  blockingReason?: string;
+  attemptedApproaches?: string[];
+  options?: string[];
+  recommendation?: string;
+  riskIfGuessed?: string;
+  neededBy?: string[];
+}
+
+export interface RequestHelpResult {
+  state: LoopState;
+  todo: RalphTodo;
+  iteration: IterationState;
+  helpRequest: HelpRequestSummary;
+  markdownPath: string;
+  jsonPath: string;
 }
 
 export interface RestartTodoResult {
@@ -113,6 +144,7 @@ export interface IterationState {
   summary?: string;
   changedFiles?: string[];
   commitSubject?: string;
+  helpRequest?: HelpRequestSummary;
 }
 
 export interface RunBudget {

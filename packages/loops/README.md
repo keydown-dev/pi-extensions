@@ -56,6 +56,7 @@ Agent tools:
 - `subagent_loop_run`
 - `subagent_loop_insert_todo`
 - `subagent_loop_assign_todo_model`
+- `subagent_loop_request_help`
 - `subagent_loop_restart`
 - `subagent_loop_pause`
 - `subagent_loop_kill`
@@ -65,6 +66,8 @@ Agent tools:
 The run tool/command returns immediately after starting background orchestration, so the parent/orchestrator chat remains available while the Subagent Loop widget streams progress. Calling it again while the same loop is running adds to `runBudget.remaining`; the active loop picks up that persisted budget after the current worker exits.
 
 `subagent_loop_insert_todo` safely inserts a new todo at a stable `insertAtIndex` without renumbering existing todos or completed iteration references. Todo IDs are semantic identity, not list positions; execution order follows the persisted todo array. The insert tool refuses to run while any todo/iteration is `running`, defaults the inserted todo to `deferred`, requires a caller-provided semantic ID such as `ISSUE-005.1`, increments `maxIterations` when present, updates both `state.json` and `plan.md`, can include a per-todo `model`, and supports `dryRun: true` for preview.
+
+`subagent_loop_request_help` is for fresh-context workers blocked by ambiguity, missing requirements, unclear ownership, or a decision that should not be guessed. It writes `help-request.md` and `help-request.json` in the active iteration directory, stores a compact open help summary on state, pauses the loop, marks the current todo `interrupted`, and tells the worker to finish artifacts with `Status: not_run` and stop. The orchestrator should resolve the request later and insert an explicit resolution subtask rather than resuming the same worker.
 
 Worker model precedence is: todo override (`todo.workerModel`) → loop default (`loop.workerDefaults.model`) → run-level fallback (`/loop-run --model` or tool `model`) → current/default Pi model. The loop persists the effective configured model on the iteration before launching the child worker and records observed model/provider when the worker reports them. `subagent_loop_assign_todo_model` can update or clear queued/deferred future todo overrides, but refuses the currently running todo so an active child worker's launch model cannot change mid-flight.
 
@@ -83,6 +86,7 @@ Task state carries work lifecycle:
 ```ts
 task.status: "queued" | "running" | "complete" | "deferred" | "failed" | "interrupted"
 task.workerModel?: string
+task.helpRequest?: { id: string; iteration: number; question: string; artifactPath: string; createdAt: string; status: "open" | "resolved" }
 ```
 
 Display status is derived:

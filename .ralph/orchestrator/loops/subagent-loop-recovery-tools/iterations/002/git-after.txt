@@ -1,0 +1,14 @@
+## orchestrator/subagent-loop-recovery-tools
+ M .ralph/orchestrator/loops/subagent-loop-recovery-tools/iterations/002/verification.md
+ M .ralph/orchestrator/loops/subagent-loop-recovery-tools/iterations/002/worker-output.jsonl
+ M packages/loops/README.md
+ M packages/loops/docs/protocol.md
+ M packages/loops/extensions/orchestrator.ts
+ M packages/loops/skills/subagent-loop/refs/pickup.md
+ M packages/loops/skills/subagent-loop/refs/tool-usage.md
+ M packages/loops/src/orchestrator.ts
+ M packages/loops/src/pi-json-worker.ts
+ M packages/loops/src/store.ts
+ M packages/loops/src/types.ts
+ M packages/loops/tests/orchestrator.test.ts
+?? .ralph/orchestrator/loops/subagent-loop-recovery-tools/iterations/002/handoff-out.md

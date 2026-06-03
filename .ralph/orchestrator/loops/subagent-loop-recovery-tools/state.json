@@ -4,7 +4,7 @@
   "branch": "orchestrator/subagent-loop-recovery-tools",
   "currentIteration": 2,
   "createdAt": "2026-06-03T23:31:02.583Z",
-  "updatedAt": "2026-06-03T23:42:13.127Z",
+  "updatedAt": "2026-06-03T23:49:55.344Z",
   "maxIterations": 4,
   "workerDefaults": {
     "contextWindow": 272000
@@ -18,7 +18,7 @@
     {
       "id": "002-complete-plans-issues-014-worker-request-help-to",
       "title": "Complete plans/issues/014-worker-request-help-tool.md",
-      "status": "running"
+      "status": "complete"
     },
     {
       "id": "003-complete-plans-issues-015-insert-resolution-subt",
@@ -86,10 +86,57 @@
     },
     {
       "number": 2,
-      "status": "running",
+      "status": "accepted",
       "todoId": "002-complete-plans-issues-014-worker-request-help-to",
       "beforeRef": "ralph/subagent-loop-recovery-tools/iter-002-before",
-      "startedAt": "2026-06-03T23:42:12.947Z"
+      "startedAt": "2026-06-03T23:42:12.947Z",
+      "diff": {
+        "filesChanged": 10,
+        "insertions": 314,
+        "deletions": 8
+      },
+      "usage": {
+        "input": 120240,
+        "output": 11427,
+        "cacheRead": 1789952,
+        "cacheWrite": 0,
+        "totalTokens": 1921619,
+        "cost": 1.838986,
+        "contextWindow": 272000,
+        "contextTokens": 56984
+      },
+      "observedModel": "gpt-5.5",
+      "model": "gpt-5.5",
+      "observedProvider": "openai-codex",
+      "provider": "openai-codex",
+      "summary": "Implemented `subagent_loop_request_help` for worker escalation. The tool records markdown/JSON help artifacts, stores compact help-request state, pauses the loop, interrupts the running todo, and provides stop-after-artifacts guidance. Worker finalization now preserves interrupted help-request state after exit, and status/plan output surfaces the help request artifact path.",
+      "changedFiles": [
+        "packages/loops/src/types.ts",
+        "packages/loops/src/orchestrator.ts",
+        "packages/loops/src/store.ts",
+        "packages/loops/extensions/orchestrator.ts",
+        "packages/loops/src/pi-json-worker.ts",
+        "packages/loops/skills/subagent-loop/refs/pickup.md",
+        "packages/loops/skills/subagent-loop/refs/tool-usage.md",
+        "packages/loops/README.md",
+        "packages/loops/docs/protocol.md",
+        "packages/loops/tests/orchestrator.test.ts",
+        ".ralph/orchestrator/loops/subagent-loop-recovery-tools/iterations/002/verification.md",
+        ".ralph/orchestrator/loops/subagent-loop-recovery-tools/iterations/002/handoff-out.md"
+      ],
+      "commitSubject": "feat: add worker request help tool",
+      "verification": {
+        "status": "passed",
+        "commands": [
+          {
+            "command": "worker-reported verification",
+            "exitCode": 0,
+            "summary": "# Verification\n\nStatus: passed\n\n## Commands\n\n- `npm run typecheck` → 0: TypeScript typecheck passed.\n- `npm test` → 0: Full @keydown-dev/pi-loops test suite passed (51/51 tests).\n- `npm run typecheck` → 0: Re-ran typecheck after final documentation update; passed.\n\n## Notes\n\nImplemented and verified Issue 014 request-help lifecycle."
+          }
+        ]
+      },
+      "afterRef": "ralph/subagent-loop-recovery-tools/iter-002-after",
+      "completedAt": "2026-06-03T23:49:55.218Z"
     }
   ],
   "runBudget": {

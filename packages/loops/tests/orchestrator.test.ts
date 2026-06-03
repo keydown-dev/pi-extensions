@@ -484,6 +484,84 @@ test("running after restart starts a fresh iteration for the same todo", async (
   assert.equal(finalState.todos[0]?.status, "complete");
 });
 
+
+test("requestHelp writes artifacts, stores summary, pauses loop, and interrupts running todo", async (t) => {
+  const cwd = await createMathFixture();
+  t.after(() => fs.rm(cwd, { recursive: true, force: true }));
+  const ralph = new RalphOrchestrator(cwd);
+  const state = await prepareRunningHelpFixture(cwd, "help-demo");
+
+  const result = await ralph.requestHelp({
+    question: "Should auth refresh use API routes or the backend?",
+    context: "Found both patterns.",
+    blockingReason: "Architecture ownership is unclear.",
+    attemptedApproaches: ["Inspected API routes", "Inspected backend client"],
+    options: ["API routes", "Backend"],
+    recommendation: "Backend",
+    riskIfGuessed: "Duplicate session behavior.",
+    neededBy: ["src/auth/session.ts"],
+  });
+
+  assert.equal(result.state.control, "paused");
+  assert.equal(result.todo.status, "interrupted");
+  assert.equal(result.iteration.status, "aborted");
+  assert.equal(result.iteration.verification?.status, "not_run");
+  assert.equal(result.helpRequest.id, "help-001");
+  assert.equal(result.helpRequest.artifactPath, `.loop/orchestrator/loops/${state.name}/iterations/001/help-request.md`);
+
+  const markdown = await fs.readFile(path.join(cwd, result.markdownPath), "utf8");
+  assert.match(markdown, /## Question\n\nShould auth refresh use API routes or the backend\?/);
+  assert.match(markdown, /## Attempted approaches\n\n- Inspected API routes\n- Inspected backend client/);
+  const json = JSON.parse(await fs.readFile(path.join(cwd, result.jsonPath), "utf8"));
+  assert.equal(json.question, "Should auth refresh use API routes or the backend?");
+
+  const persisted = await ralph.status(state.name);
+  assert.equal(persisted.todos[0]?.helpRequest?.question, "Should auth refresh use API routes or the backend?");
+  assert.equal(persisted.iterations[0]?.helpRequest?.artifactPath, result.helpRequest.artifactPath);
+  assert.match(renderStatus(persisted), /help: Should auth refresh use API routes or the backend\? \(\.loop\/orchestrator\/loops\/help-demo\/iterations\/001\/help-request\.md\)/);
+});
+
+test("requestHelp refuses missing, multiple, and non-running loops", async (t) => {
+  const cwd = await createMathFixture();
+  t.after(() => fs.rm(cwd, { recursive: true, force: true }));
+  const ralph = new RalphOrchestrator(cwd);
+
+  await assert.rejects(() => ralph.requestHelp({ question: "What now?" }), /No running Subagent Loop/);
+  await ralph.start({ name: "idle-help", todos: ["First"] });
+  await assert.rejects(() => ralph.requestHelp({ name: "idle-help", question: "What now?" }), /no running todo/);
+
+  await prepareRunningHelpFixture(cwd, "help-one");
+  await prepareRunningHelpFixture(cwd, "help-two");
+  await assert.rejects(() => ralph.requestHelp({ question: "Which one?" }), /Multiple running Subagent Loops/);
+});
+
+test("worker exit with not_run preserves interrupted help-request state", async (t) => {
+  const cwd = await createMathFixture();
+  t.after(() => fs.rm(cwd, { recursive: true, force: true }));
+  const ralph = new RalphOrchestrator(cwd);
+  await ralph.start({ name: "help-preserve", todos: ["Add subtract test and implementation", "Add multiply test and implementation"] });
+  let requested = false;
+
+  const finalState = await ralph.run("help-preserve", {
+    maxIterations: 2,
+    workerMode: "scripted",
+    async onProgress(progress) {
+      if (!requested && progress.state.todos.some((todo) => todo.status === "running")) {
+        requested = true;
+        await ralph.requestHelp({ name: "help-preserve", question: "Which implementation path should be used?" });
+      }
+    },
+  });
+
+  assert.equal(requested, true);
+  assert.equal(finalState.control, "paused");
+  assert.equal(finalState.todos[0]?.status, "interrupted");
+  assert.equal(finalState.todos[0]?.helpRequest?.question, "Which implementation path should be used?");
+  assert.equal(finalState.todos[1]?.status, "deferred");
+  assert.equal(finalState.iterations[0]?.status, "aborted");
+  assert.equal(finalState.iterations[0]?.verification?.status, "passed");
+});
+
 test("completion callback is emitted before the next iteration starts", async (t) => {
   const cwd = await createMathFixture();
   t.after(() => fs.rm(cwd, { recursive: true, force: true }));
@@ -1151,6 +1229,26 @@ const taggedTheme = {
     return text;
   },
 };
+
+
+async function prepareRunningHelpFixture(cwd: string, name: string) {
+  const ralph = new RalphOrchestrator(cwd);
+  const state = await ralph.start({ name, todos: ["First", "Second"] });
+  state.currentIteration = 1;
+  state.runBudget = { remaining: 1, updatedAt: "2026-05-27T00:00:00.000Z", updatedBy: "orchestrator" };
+  state.todos[0]!.status = "running";
+  state.iterations.push({
+    number: 1,
+    status: "running",
+    todoId: state.todos[0]!.id,
+    beforeRef: `ralph/${state.name}/iter-001-before`,
+    startedAt: "2026-05-27T00:00:00.000Z",
+  });
+  await fs.mkdir(path.join(cwd, ".loop", "orchestrator", "loops", state.name, "iterations", "001"), { recursive: true });
+  await fs.writeFile(path.join(cwd, ".loop", "orchestrator", "loops", state.name, "iterations", "001", "handoff-in.md"), "# handoff\n", "utf8");
+  await writeLoopState(cwd, state);
+  return state;
+}
 
 async function prepareInterruptedRestartFixture(cwd: string, name: string) {
   const ralph = new RalphOrchestrator(cwd);

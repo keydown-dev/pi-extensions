@@ -144,6 +144,7 @@ Worker responsibilities:
 
 - Read only the assigned `handoff-in.md` first, then inspect referenced files or the minimum necessary local context.
 - Complete exactly the assigned todo slice.
+- If blocked by ambiguity, missing requirements, unclear ownership, or a decision that should not be guessed, call `subagent_loop_request_help` with a focused question and useful context, then write final artifacts with `Status: not_run` and stop.
 - Write `verification.md` with commands/results and a status line.
 - Write `handoff-out.md` with these parseable sections:
   - `## Summary`: concise outcome or blocker.
@@ -156,6 +157,14 @@ Worker responsibilities:
 `subagent_loop_insert_todo` inserts a new task at an explicit array position. Existing todo IDs and completed iteration `todoId` references are preserved; execution order follows the persisted todo array order. The inserted todo defaults to `deferred`, uses the caller-provided semantic ID, can include a per-todo `model`, and increments `maxIterations` when that field is present. The tool refuses to modify loops with running todos or iterations and supports `dryRun: true` for a before/after preview.
 
 `subagent_loop_assign_todo_model` updates or clears a persisted model override for a future todo. It refuses a `running` todo so callers do not imply that an already-started child worker changed models.
+
+## Worker help requests
+
+`subagent_loop_request_help` is a terminal escalation path for the active worker. The tool infers the single running loop when possible, or accepts `name`; it refuses when no running loop/iteration exists, when multiple running loops exist and no name is supplied, when the selected loop has no running todo, or when the active iteration directory is missing.
+
+On success, it writes `help-request.md` and `help-request.json` in the active iteration directory, stores a compact `helpRequest` summary/link on the running todo and iteration, sets loop control to `paused`, marks the todo `interrupted`, and marks the iteration `aborted` with `Status: not_run`. The worker must then write `handoff-out.md`, write `verification.md` with `Status: not_run`, and stop. When the worker exits, the orchestrator preserves the interrupted/help-request state instead of converting the todo to `failed` merely because verification was not run. Status output includes the open question and artifact path.
+
+The orchestrator/human should answer the question later and insert a visible resolution subtask; the v1 tool does not resume the same worker and does not automatically create follow-up todos.
 
 ## Todo restart
 

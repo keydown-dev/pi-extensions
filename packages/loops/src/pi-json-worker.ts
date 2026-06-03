@@ -83,7 +83,9 @@ Required output files:
 Important constraints:
 - Complete only iteration ${input.iteration.number}, todo #${input.todo.id}: ${input.todo.title}
 - Keep context small: read the handoff first, then inspect only referenced or necessary files.
-- If blocked, write handoff-out.md and verification.md explaining the blocker.
+- If blocked by ambiguity or a missing product/architecture decision, call subagent_loop_request_help with a focused question before stopping.
+- After subagent_loop_request_help returns, write handoff-out.md and verification.md with Status: not_run, then stop.
+- For non-ambiguity blockers, write handoff-out.md and verification.md explaining the blocker.
 - Before finishing, ensure verification.md has a line like: Status: passed OR Status: failed OR Status: not_run.
 - Include a ## Commit subject section in handoff-out.md with one short single-line commit subject that follows this project's commit style when you can infer it.
 - Do not start the next Subagent Loop iteration.`;

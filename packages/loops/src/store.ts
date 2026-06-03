@@ -132,7 +132,8 @@ function renderPlan(state: LoopState): string {
   for (const todo of state.todos) {
     const box = todo.status === "complete" ? "x" : " ";
     const model = todo.workerModel ? ` · model: ${todo.workerModel}` : state.workerDefaults?.model ? ` · model: ${state.workerDefaults.model}` : "";
-    lines.push(`- [${box}] ${todo.id}. ${todo.title} (${todo.status})${model}`);
+    const help = todo.helpRequest ? ` · help: ${todo.helpRequest.artifactPath}` : "";
+    lines.push(`- [${box}] ${todo.id}. ${todo.title} (${todo.status})${model}${help}`);
   }
   lines.push("");
   return lines.join("\n");
@@ -178,6 +179,15 @@ async function ensureRalphArtifactGitignore(cwd: string): Promise<void> {
   const prefix = existing.length === 0 || existing.endsWith("\n") ? "" : "\n";
   await fs.writeFile(gitignorePath, `${existing}${prefix}${missingLines.join("\n")}\n`, "utf8");
 }
+
+const HelpRequestSummarySchema = Type.Object({
+  id: Type.String(),
+  iteration: Type.Number(),
+  question: Type.String(),
+  artifactPath: Type.String(),
+  createdAt: Type.String(),
+  status: Type.Union([Type.Literal("open"), Type.Literal("resolved")]),
+}, { additionalProperties: false });
 
 const VerificationRecordSchema = Type.Object({
   status: Type.Union([Type.Literal("passed"), Type.Literal("failed"), Type.Literal("not_run")]),
@@ -241,6 +251,7 @@ const IterationStateSchema = Type.Object({
   summary: Type.Optional(Type.String()),
   changedFiles: Type.Optional(Type.Array(Type.String())),
   commitSubject: Type.Optional(Type.String()),
+  helpRequest: Type.Optional(HelpRequestSummarySchema),
 }, { additionalProperties: false });
 
 const RalphTodoSchema = Type.Object({
@@ -257,6 +268,7 @@ const RalphTodoSchema = Type.Object({
   workerModel: Type.Optional(Type.String()),
   workerProvider: Type.Optional(Type.String()),
   workerContextWindow: Type.Optional(Type.Number()),
+  helpRequest: Type.Optional(HelpRequestSummarySchema),
 }, { additionalProperties: false });
 
 const RunBudgetSchema = Type.Object({

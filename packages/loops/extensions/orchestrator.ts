@@ -399,6 +399,37 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
+
+  pi.registerTool({
+    name: "subagent_loop_request_help",
+    label: "Request Loop Help",
+    description: "Worker escalation tool for ambiguity, missing requirements, unclear ownership, or decisions that should not be guessed.",
+    promptSnippet: "Call when blocked by ambiguity; the tool pauses the loop, records a help request, and instructs you to stop after handoff/verification.",
+    parameters: Type.Object({
+      name: Type.Optional(Type.String({ description: "Loop name. Inferred from the single running loop when omitted." })),
+      question: Type.String({ description: "Focused question the orchestrator or human must answer." }),
+      context: Type.Optional(Type.String({ description: "Relevant context discovered while investigating." })),
+      blockingReason: Type.Optional(Type.String({ description: "Why this blocks safe progress." })),
+      attemptedApproaches: Type.Optional(Type.Array(Type.String(), { description: "Approaches or files already inspected." })),
+      options: Type.Optional(Type.Array(Type.String(), { description: "Possible answers or paths forward." })),
+      recommendation: Type.Optional(Type.String({ description: "Recommended answer when one is apparent." })),
+      riskIfGuessed: Type.Optional(Type.String({ description: "What could go wrong if the worker guesses." })),
+      neededBy: Type.Optional(Type.Array(Type.String(), { description: "Files or work items affected by the answer." })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const result = await new RalphOrchestrator(ctx.cwd, packageRoot).requestHelp(params);
+      currentLoop = result.state.name;
+      updateUI(ctx, result.state);
+      return {
+        content: [{ type: "text", text: renderRequestHelpResponse(result) }],
+        details: {
+          ...result,
+          nextAction: "Write handoff-out.md, write verification.md with Status: not_run, then stop without further implementation work.",
+        },
+      };
+    },
+  });
+
   pi.registerTool({
     name: "subagent_loop_pause",
     label: "Pause Subagent Loop",
@@ -593,6 +624,19 @@ function extractTodos(taskContent: string): string[] {
     .map((line) => line.match(/^\s*- \[[ xX]\]\s+(.+)$/)?.[1]?.trim())
     .filter((todo): todo is string => Boolean(todo));
   return todos.length ? todos : [taskContent.trim().split("\n")[0] || "Work through requested task"];
+}
+
+
+function renderRequestHelpResponse(result: { state: LoopState; helpRequest: { question: string; artifactPath: string }; jsonPath: string }): string {
+  return [
+    `Recorded help request for Subagent Loop "${result.state.name}".`,
+    "",
+    `Question: ${result.helpRequest.question}`,
+    `Artifacts: ${result.helpRequest.artifactPath}, ${result.jsonPath}`,
+    "",
+    "Loop is paused and the current todo is interrupted.",
+    "Stop now after writing handoff-out.md and verification.md with Status: not_run.",
+  ].join("\n");
 }
 
 function renderToolResponse(state: LoopState, lead: string): string {

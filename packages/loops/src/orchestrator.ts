@@ -6,7 +6,7 @@ import { slugifyLoopName } from "./paths.js";
 import { killRalphWorkerProcesses, PiJsonWorkerRunner } from "./pi-json-worker.js";
 import { ScriptedMathWorker } from "./scripted-worker.js";
 import { RalphStore } from "./store.js";
-import type { AssignTodoModelOptions, AssignTodoModelResult, DerivedLoopStatus, InsertTodoOptions, InsertTodoResult, IterationState, LoopState, RalphTodo, RestartTodoOptions, RestartTodoResult, RunOptions, StartOptions, WorkerProgress } from "./types.js";
+import type { AssignTodoModelOptions, AssignTodoModelResult, DerivedLoopStatus, InsertTodoOptions, InsertTodoResult, IterationState, LoopState, RalphTodo, RequestHelpOptions, RequestHelpResult, RestartTodoOptions, RestartTodoResult, RunOptions, StartOptions, WorkerProgress } from "./types.js";
 
 const DEFAULT_TODOS = ["Add subtract test and implementation", "Add multiply test and implementation", "Add divide test and implementation"];
 
@@ -180,6 +180,61 @@ export class RalphOrchestrator {
     };
   }
 
+
+  async requestHelp(options: RequestHelpOptions): Promise<RequestHelpResult> {
+    if (!options.question.trim()) throw new Error("Help request question cannot be empty.");
+    const state = options.name ? await this.store.readState(slugifyLoopName(options.name)) : await this.selectRunningStateForHelp();
+    const runningTodos = state.todos.filter((todo) => todo.status === "running");
+    if (runningTodos.length === 0) throw new Error(`Selected loop has no running todo: ${state.name}`);
+    if (runningTodos.length > 1) throw new Error(`Selected loop has multiple running todos: ${state.name}`);
+    const runningIterations = state.iterations.filter((iteration) => iteration.status === "running");
+    if (runningIterations.length === 0) throw new Error(`Selected loop has no running iteration: ${state.name}`);
+    if (runningIterations.length > 1) throw new Error(`Selected loop has multiple running iterations: ${state.name}`);
+    const todo = runningTodos[0]!;
+    const iteration = runningIterations[0]!;
+    if (String(iteration.todoId) !== String(todo.id)) throw new Error(`Running todo and iteration do not match in ${state.name}.`);
+
+    const iterationDir = this.store.getIterationDir(state.name, iteration.number);
+    try {
+      const stat = await fs.stat(iterationDir);
+      if (!stat.isDirectory()) throw new Error("not a directory");
+    } catch (error) {
+      throw new Error(`Selected iteration directory cannot be found: ${iterationDir}`);
+    }
+
+    const createdAt = new Date().toISOString();
+    const id = `help-${String(iteration.number).padStart(3, "0")}`;
+    const artifactPath = path.relative(this.cwd, path.join(iterationDir, "help-request.md"));
+    const helpRequest = { id, iteration: iteration.number, question: options.question.trim(), artifactPath, createdAt, status: "open" as const };
+    const details = { ...options, name: state.name, todoId: todo.id, iteration: iteration.number, id, artifactPath, createdAt, status: "open" as const };
+
+    await fs.writeFile(path.join(iterationDir, "help-request.md"), renderHelpRequestMarkdown(details), "utf8");
+    await fs.writeFile(path.join(iterationDir, "help-request.json"), `${JSON.stringify(details, null, 2)}\n`, "utf8");
+
+    state.control = "paused";
+    delete state.runBudget;
+    todo.status = "interrupted";
+    todo.helpRequest = helpRequest;
+    iteration.status = "aborted";
+    iteration.completedAt = createdAt;
+    iteration.summary = "Worker requested help";
+    iteration.helpRequest = helpRequest;
+    iteration.verification = {
+      status: "not_run",
+      commands: [{ command: "subagent_loop_request_help", exitCode: 0, summary: "Worker requested help; implementation stopped before verification" }],
+      notes: "Loop paused and current todo interrupted until the help request is resolved.",
+    };
+    await this.store.writeState(state);
+    return { state, todo, iteration, helpRequest, markdownPath: artifactPath, jsonPath: path.relative(this.cwd, path.join(iterationDir, "help-request.json")) };
+  }
+
+  private async selectRunningStateForHelp(): Promise<LoopState> {
+    const running = (await this.store.listStates()).filter((state) => state.todos.some((todo) => todo.status === "running") || state.iterations.some((iteration) => iteration.status === "running"));
+    if (running.length === 0) throw new Error("No running Subagent Loop exists for a help request.");
+    if (running.length > 1) throw new Error(`Multiple running Subagent Loops exist; pass name. Candidates: ${running.map((state) => state.name).join(", ")}`);
+    return running[0]!;
+  }
+
   async kill(name: string): Promise<{ state: LoopState; killed: number }> {
     const state = await this.store.readState(slugifyLoopName(name));
     const killed = killRalphWorkerProcesses(state.name);
@@ -278,6 +333,9 @@ export class RalphOrchestrator {
     iteration.changedFiles = result.changedFiles;
     iteration.commitSubject = result.commitSubject;
     const latest = await this.store.readState(state.name);
+    const latestTodo = latest.todos.find((item) => String(item.id) === String(todo.id));
+    const latestIteration = latest.iterations.find((item) => item.number === iteration.number);
+    const externalHelpRequest = latestTodo?.helpRequest ?? latestIteration?.helpRequest;
     preserveExternalRunUpdates(state, latest, todo.id);
     const externallyPaused = latest.control === "paused";
     const killed = /(?:ralph-kill|loop kill|loop-kill)/i.test(result.verification.notes ?? "") || result.verification.commands.some((command) => /(?:ralph-kill|loop kill|loop-kill)/i.test(command.summary));
@@ -286,7 +344,15 @@ export class RalphOrchestrator {
     iteration.afterRef = afterRef(state.name, iterationNumber);
     iteration.completedAt = new Date().toISOString();
 
-    if (killed) {
+    if (externalHelpRequest) {
+      iteration.status = "aborted";
+      iteration.summary = latestIteration?.summary ?? "Worker requested help";
+      iteration.helpRequest = externalHelpRequest;
+      todo.status = "interrupted";
+      todo.helpRequest = externalHelpRequest;
+      state.control = "paused";
+      deferQueuedTodos(state);
+    } else if (killed) {
       const changed = (iteration.diff?.filesChanged ?? 0) > 0;
       iteration.status = "aborted";
       todo.status = changed ? "interrupted" : "queued";
@@ -354,6 +420,42 @@ export class RalphOrchestrator {
     }
     return this.store.readState(slugifyLoopName(name));
   }
+}
+
+
+function renderHelpRequestMarkdown(details: RequestHelpOptions & { name: string; todoId: RalphTodo["id"]; iteration: number; id: string; artifactPath: string; createdAt: string; status: "open" }): string {
+  const lines = [
+    `# Help request ${details.id}`,
+    "",
+    `Loop: ${details.name}`,
+    `Iteration: ${details.iteration}`,
+    `Todo: ${details.todoId}`,
+    `Status: ${details.status}`,
+    `Created: ${details.createdAt}`,
+    "",
+    "## Question",
+    "",
+    details.question,
+  ];
+  appendOptionalSection(lines, "Context", details.context);
+  appendOptionalSection(lines, "Blocking reason", details.blockingReason);
+  appendListSection(lines, "Attempted approaches", details.attemptedApproaches);
+  appendListSection(lines, "Options", details.options);
+  appendOptionalSection(lines, "Recommendation", details.recommendation);
+  appendOptionalSection(lines, "Risk if guessed", details.riskIfGuessed);
+  appendListSection(lines, "Needed by", details.neededBy);
+  lines.push("");
+  return lines.join("\n");
+}
+
+function appendOptionalSection(lines: string[], title: string, value: string | undefined): void {
+  if (!value) return;
+  lines.push("", `## ${title}`, "", value);
+}
+
+function appendListSection(lines: string[], title: string, values: string[] | undefined): void {
+  if (!values?.length) return;
+  lines.push("", `## ${title}`, "", ...values.map((value) => `- ${value}`));
 }
 
 function slify(name: string): string {
@@ -486,7 +588,8 @@ export function renderStatus(state: LoopState): string {
       const diff = iteration?.diff ? ` · ${formatDiffStats(iteration.diff)}` : "";
       const model = durableModelForTodo(state, todo, iteration);
       const modelText = model ? ` · ${model}` : "";
-      return `${index === state.todos.length - 1 ? "└─" : "├─"} ${todoIcon(todo.status)} #${todo.id} ${todo.title}${todo.status === "running" ? " (working)" : ""}${todo.status === "deferred" ? " (deferred)" : ""}${modelText}${diff}`;
+      const helpText = todo.helpRequest ? ` · help: ${todo.helpRequest.question} (${todo.helpRequest.artifactPath})` : "";
+      return `${index === state.todos.length - 1 ? "└─" : "├─"} ${todoIcon(todo.status)} #${todo.id} ${todo.title}${todo.status === "running" ? " (working)" : ""}${todo.status === "deferred" ? " (deferred)" : ""}${modelText}${diff}${helpText}`;
     }),
     "",
     "Chat to pause, resume, kill, or steer the loop.",

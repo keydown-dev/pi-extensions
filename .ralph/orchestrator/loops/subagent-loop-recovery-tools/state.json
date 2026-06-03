@@ -1,0 +1,35 @@
+{
+  "name": "subagent-loop-recovery-tools",
+  "control": "active",
+  "branch": "orchestrator/subagent-loop-recovery-tools",
+  "currentIteration": 0,
+  "createdAt": "2026-06-03T23:31:02.583Z",
+  "updatedAt": "2026-06-03T23:31:02.585Z",
+  "maxIterations": 4,
+  "workerDefaults": {
+    "contextWindow": 272000
+  },
+  "todos": [
+    {
+      "id": "001-complete-plans-issues-013-restart-interrupted-lo",
+      "title": "Complete plans/issues/013-restart-interrupted-loop-todo.md",
+      "status": "queued"
+    },
+    {
+      "id": "002-complete-plans-issues-014-worker-request-help-to",
+      "title": "Complete plans/issues/014-worker-request-help-tool.md",
+      "status": "queued"
+    },
+    {
+      "id": "003-complete-plans-issues-015-insert-resolution-subt",
+      "title": "Complete plans/issues/015-insert-resolution-subtask-chains.md",
+      "status": "queued"
+    },
+    {
+      "id": "004-complete-plans-issues-016-subagent-loop-recovery",
+      "title": "Complete plans/issues/016-subagent-loop-recovery-and-help-skills.md",
+      "status": "queued"
+    }
+  ],
+  "iterations": []
+}

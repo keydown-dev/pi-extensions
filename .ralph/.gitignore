@@ -1,0 +1,5 @@
+# Ralph-managed local diagnostics
+worker-output.raw.jsonl
+worker-output.raw.jsonl.*
+*.raw.jsonl
+*.raw.jsonl.*

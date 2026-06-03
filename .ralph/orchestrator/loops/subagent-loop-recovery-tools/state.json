@@ -2,9 +2,9 @@
   "name": "subagent-loop-recovery-tools",
   "control": "active",
   "branch": "orchestrator/subagent-loop-recovery-tools",
-  "currentIteration": 1,
+  "currentIteration": 2,
   "createdAt": "2026-06-03T23:31:02.583Z",
-  "updatedAt": "2026-06-03T23:42:12.291Z",
+  "updatedAt": "2026-06-03T23:42:13.127Z",
   "maxIterations": 4,
   "workerDefaults": {
     "contextWindow": 272000
@@ -18,7 +18,7 @@
     {
       "id": "002-complete-plans-issues-014-worker-request-help-to",
       "title": "Complete plans/issues/014-worker-request-help-tool.md",
-      "status": "queued"
+      "status": "running"
     },
     {
       "id": "003-complete-plans-issues-015-insert-resolution-subt",
@@ -83,11 +83,18 @@
       },
       "afterRef": "ralph/subagent-loop-recovery-tools/iter-001-after",
       "completedAt": "2026-06-03T23:42:12.183Z"
+    },
+    {
+      "number": 2,
+      "status": "running",
+      "todoId": "002-complete-plans-issues-014-worker-request-help-to",
+      "beforeRef": "ralph/subagent-loop-recovery-tools/iter-002-before",
+      "startedAt": "2026-06-03T23:42:12.947Z"
     }
   ],
   "runBudget": {
-    "remaining": 3,
-    "updatedAt": "2026-06-03T23:31:56.175Z",
+    "remaining": 2,
+    "updatedAt": "2026-06-03T23:42:12.836Z",
     "updatedBy": "orchestrator"
   }
 }

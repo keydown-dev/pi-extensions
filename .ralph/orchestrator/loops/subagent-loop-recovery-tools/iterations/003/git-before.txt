@@ -1,0 +1,3 @@
+## orchestrator/subagent-loop-recovery-tools
+ M .ralph/orchestrator/loops/subagent-loop-recovery-tools/state.json
+?? .ralph/orchestrator/loops/subagent-loop-recovery-tools/iterations/003/

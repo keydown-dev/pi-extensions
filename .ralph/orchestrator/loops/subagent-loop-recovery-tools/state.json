@@ -4,7 +4,7 @@
   "branch": "orchestrator/subagent-loop-recovery-tools",
   "currentIteration": 3,
   "createdAt": "2026-06-03T23:31:02.583Z",
-  "updatedAt": "2026-06-03T23:49:56.205Z",
+  "updatedAt": "2026-06-04T00:03:12.907Z",
   "maxIterations": 4,
   "workerDefaults": {
     "contextWindow": 272000
@@ -23,7 +23,7 @@
     {
       "id": "003-complete-plans-issues-015-insert-resolution-subt",
       "title": "Complete plans/issues/015-insert-resolution-subtask-chains.md",
-      "status": "running"
+      "status": "complete"
     },
     {
       "id": "004-complete-plans-issues-016-subagent-loop-recovery",
@@ -140,10 +140,55 @@
     },
     {
       "number": 3,
-      "status": "running",
+      "status": "accepted",
       "todoId": "003-complete-plans-issues-015-insert-resolution-subt",
       "beforeRef": "ralph/subagent-loop-recovery-tools/iter-003-before",
-      "startedAt": "2026-06-03T23:49:56.054Z"
+      "startedAt": "2026-06-03T23:49:56.054Z",
+      "diff": {
+        "filesChanged": 8,
+        "insertions": 325,
+        "deletions": 13
+      },
+      "usage": {
+        "input": 184107,
+        "output": 16333,
+        "cacheRead": 1835520,
+        "cacheWrite": 0,
+        "totalTokens": 2035960,
+        "cost": 2.3282849999999997,
+        "contextWindow": 272000,
+        "contextTokens": 71033
+      },
+      "observedModel": "gpt-5.5",
+      "model": "gpt-5.5",
+      "observedProvider": "openai-codex",
+      "provider": "openai-codex",
+      "summary": "Implemented `subagent_loop_insert_todo_subtask` resolution chains for unfinished loop todos, including state metadata, deterministic flat sibling placement, run eligibility for queued resolution chains, resolution completion semantics, enriched handoff-in context, tests, and documentation updates.",
+      "changedFiles": [
+        "packages/loops/src/types.ts",
+        "packages/loops/src/store.ts",
+        "packages/loops/src/orchestrator.ts",
+        "packages/loops/extensions/orchestrator.ts",
+        "packages/loops/tests/orchestrator.test.ts",
+        "packages/loops/README.md",
+        "packages/loops/docs/protocol.md",
+        "packages/loops/skills/subagent-loop/refs/tool-usage.md",
+        ".ralph/orchestrator/loops/subagent-loop-recovery-tools/iterations/003/verification.md",
+        ".ralph/orchestrator/loops/subagent-loop-recovery-tools/iterations/003/handoff-out.md"
+      ],
+      "commitSubject": "feat: add resolution subtask chains",
+      "verification": {
+        "status": "passed",
+        "commands": [
+          {
+            "command": "worker-reported verification",
+            "exitCode": 0,
+            "summary": "# Verification\n\nStatus: passed\n\n## Commands\n\n- `cd packages/loops && npm run typecheck` → 0: TypeScript typecheck passed.\n- `cd packages/loops && npm test` → 0: All 54 tests passed."
+          }
+        ]
+      },
+      "afterRef": "ralph/subagent-loop-recovery-tools/iter-003-after",
+      "completedAt": "2026-06-04T00:03:12.742Z"
     }
   ],
   "runBudget": {

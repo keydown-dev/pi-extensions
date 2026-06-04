@@ -156,6 +156,10 @@ Worker responsibilities:
 
 `subagent_loop_insert_todo` inserts a new task at an explicit array position. Existing todo IDs and completed iteration `todoId` references are preserved; execution order follows the persisted todo array order. The inserted todo defaults to `deferred`, uses the caller-provided semantic ID, can include a per-todo `model`, and increments `maxIterations` when that field is present. The tool refuses to modify loops with running todos or iterations and supports `dryRun: true` for a before/after preview.
 
+`subagent_loop_insert_todo_subtask` inserts a first-class resolution subtask for an unfinished parent/root todo. The caller provides `insertAsSubtask`, an explicit flat semantic ID like `005.1-finish-after-answer`, a title, optional handoff `instructions`, optional status/model, and optional `dryRun`. Placement is deterministic: immediately after the root if no subtasks exist, otherwise after the last sibling in that root chain; passing an existing subtask normalizes to the root and inserts the next flat sibling. Resolution subtasks default to `queued`, inherit the original todo's acceptance criteria and verification standards, and keep the parent/root chain visibly incomplete until a subtask passes.
+
+When a resolution subtask runs, `handoff-in.md` includes the root todo, previous incomplete/interrupted attempt, relevant prior iteration artifact names, handoff instructions, and an explicit reminder that passing the subtask resolves the parent acceptance criteria. If a subtask completes with `Status: passed`, prior interrupted chain members are marked complete and rich audit fields such as `resolvedByTodoId`, `resolvedAt`, and `resolutionReason` are recorded. `failed` or `not_run` subtasks do not resolve the parent; insert another flat sibling if more recovery is needed. While a chain is unresolved, only the earliest unresolved chain is eligible to run and later unrelated todos remain blocked.
+
 `subagent_loop_assign_todo_model` updates or clears a persisted model override for a future todo. It refuses a `running` todo so callers do not imply that an already-started child worker changed models.
 
 ## Worker help requests
@@ -164,7 +168,7 @@ Worker responsibilities:
 
 On success, it writes `help-request.md` and `help-request.json` in the active iteration directory, stores a compact `helpRequest` summary/link on the running todo and iteration, sets loop control to `paused`, marks the todo `interrupted`, and marks the iteration `aborted` with `Status: not_run`. The worker must then write `handoff-out.md`, write `verification.md` with `Status: not_run`, and stop. When the worker exits, the orchestrator preserves the interrupted/help-request state instead of converting the todo to `failed` merely because verification was not run. Status output includes the open question and artifact path.
 
-The orchestrator/human should answer the question later and insert a visible resolution subtask; the v1 tool does not resume the same worker and does not automatically create follow-up todos.
+The orchestrator/human should answer the question later and insert a visible resolution subtask with `subagent_loop_insert_todo_subtask`; the help tool does not resume the same worker and does not automatically create follow-up todos.
 
 ## Todo restart
 

@@ -408,6 +408,73 @@ test("derived status reports needs attention for interrupted tasks", async (t) =
   assert.equal(deriveLoopStatus(state), "needs_attention");
 });
 
+test("insertTodoSubtask places flat resolution subtasks and persists metadata", async (t) => {
+  const cwd = await createMathFixture();
+  t.after(() => fs.rm(cwd, { recursive: true, force: true }));
+  const ralph = new RalphOrchestrator(cwd);
+  const state = await ralph.start({ name: "resolution-insert-demo", todos: ["First", "Second"], maxIterations: 1 });
+  state.todos[0]!.status = "interrupted";
+  await writeLoopState(cwd, state);
+
+  const first = await ralph.insertTodoSubtask({ name: state.name, insertAsSubtask: "001-first", id: "001.1-finish-first-after-answer", title: "Finish first after answer", instructions: "Human clarified the API.", dryRun: true });
+  assert.equal(first.dryRun, true);
+  assert.equal(first.insertAtIndex, 1);
+  assert.equal(first.insertedTodo.status, "queued");
+  assert.equal(first.insertedTodo.handoffInstructions, "Human clarified the API.");
+  assert.equal(first.insertedTodo.rootTodoId, "001-first");
+  assert.equal(first.state.todos[0]?.status, "interrupted");
+  assert.equal(first.state.todos[0]?.resolutionTodoIds?.[0], "001.1-finish-first-after-answer");
+  assert.equal((await ralph.status(state.name)).todos.length, 2);
+
+  await ralph.insertTodoSubtask({ name: state.name, insertAsSubtask: "001-first", id: "001.1-finish-first-after-answer", title: "Finish first after answer", instructions: "Human clarified the API." });
+  const second = await ralph.insertTodoSubtask({ name: state.name, insertAsSubtask: "001.1-finish-first-after-answer", id: "001.2-finish-first-after-env", title: "Finish first after env", status: "deferred", dryRun: true });
+  assert.deepEqual(second.state.todos.map((todo) => todo.id), ["001-first", "001.1-finish-first-after-answer", "001.2-finish-first-after-env", "002-second"]);
+  assert.equal(second.insertedTodo.status, "deferred");
+  await assert.rejects(() => ralph.insertTodoSubtask({ name: state.name, insertAsSubtask: "001-first", id: "001.9-wrong", title: "Wrong" }), /should start with 001\.2-/);
+});
+
+test("resolution subtask makes interrupted chain runnable and handoff inherits parent", async (t) => {
+  const cwd = await createMathFixture();
+  t.after(() => fs.rm(cwd, { recursive: true, force: true }));
+  const ralph = new RalphOrchestrator(cwd);
+  const state = await prepareInterruptedRestartFixture(cwd, "resolution-run-demo");
+
+  await ralph.insertTodoSubtask({ name: state.name, insertAsSubtask: "001-add-subtract-test-and-implementation", id: "001.1-finish-subtract-after-clarification", title: "Add subtract test and implementation", instructions: "Use the existing math module." });
+  let inserted = await ralph.status(state.name);
+  assert.equal(deriveLoopStatus(inserted), "ready");
+  assert.deepEqual(inserted.todos.map((todo) => todo.status), ["interrupted", "queued"]);
+
+  const finalState = await ralph.run(state.name, { maxIterations: 1, workerMode: "scripted" });
+  assert.equal(finalState.todos[0]?.status, "complete");
+  assert.equal(finalState.todos[1]?.status, "complete");
+  assert.equal(finalState.todos[0]?.resolvedByTodoId, "001.1-finish-subtract-after-clarification");
+  assert.equal(finalState.iterations.at(-1)?.status, "accepted");
+  const handoffIn = await fs.readFile(path.join(cwd, ".loop", "orchestrator", "loops", state.name, "iterations", "002", "handoff-in.md"), "utf8");
+  assert.match(handoffIn, /## Resolution subtask context/);
+  assert.match(handoffIn, /Use the existing math module\./);
+  assert.match(handoffIn, /Passing this subtask resolves the parent chain/);
+});
+
+test("failed resolution subtask does not resolve parent and later sibling can run", async (t) => {
+  const cwd = await createMathFixture();
+  t.after(() => fs.rm(cwd, { recursive: true, force: true }));
+  const ralph = new RalphOrchestrator(cwd);
+  const state = await ralph.start({ name: "resolution-failed-demo", todos: ["First", "Second"] });
+  state.todos[0]!.status = "interrupted";
+  await writeLoopState(cwd, state);
+
+  await ralph.insertTodoSubtask({ name: state.name, insertAsSubtask: "001-first", id: "001.1-finish-first", title: "Finish first" });
+  let current = await ralph.status(state.name);
+  current.todos[1]!.status = "failed";
+  await writeLoopState(cwd, current);
+  assert.equal(deriveLoopStatus(await ralph.status(state.name)), "needs_attention");
+
+  await ralph.insertTodoSubtask({ name: state.name, insertAsSubtask: "001.1-finish-first", id: "001.2-finish-first-again", title: "Finish first again" });
+  current = await ralph.status(state.name);
+  assert.equal(deriveLoopStatus(current), "ready");
+  assert.deepEqual(current.todos.map((todo) => todo.status), ["interrupted", "failed", "queued", "deferred"]);
+});
+
 test("restart dry-run reports target refs and does not mutate state or git", async (t) => {
   const cwd = await createMathFixture();
   t.after(() => fs.rm(cwd, { recursive: true, force: true }));

@@ -141,7 +141,20 @@ function renderPlan(state: LoopState): string {
 
 function renderHandoffIn(state: LoopState, iteration: IterationState, todo: RalphTodo): string {
   const modelLine = iteration.configuredModel ?? iteration.model ? `\nWorker model: ${iteration.configuredModel ?? iteration.model}\n` : "";
-  return `# Ralph handoff-in\n\nLoop: ${state.name}\nIteration: ${iteration.number}\nTodo: ${todo.id}. ${todo.title}${modelLine}\n## Task\n\nComplete exactly this todo item. Keep changes bounded and record verification.\n\n## Required output\n\nProduce handoff-out.md and verification.md for this iteration. Include a ## Commit subject section in handoff-out.md with one short single-line commit subject that follows this project's commit style when you can infer it.\n`;
+  const resolutionContext = renderResolutionSubtaskContext(state, todo);
+  return `# Ralph handoff-in\n\nLoop: ${state.name}\nIteration: ${iteration.number}\nTodo: ${todo.id}. ${todo.title}${modelLine}\n## Task\n\nComplete exactly this todo item. Keep changes bounded and record verification.${resolutionContext}\n\n## Required output\n\nProduce handoff-out.md and verification.md for this iteration. Include a ## Commit subject section in handoff-out.md with one short single-line commit subject that follows this project's commit style when you can infer it.\n`;
+}
+
+function renderResolutionSubtaskContext(state: LoopState, todo: RalphTodo): string {
+  if (todo.createdReason !== "resolution_subtask" || !todo.rootTodoId) return "";
+  const root = state.todos.find((item) => String(item.id) === String(todo.rootTodoId));
+  const previous = [...state.todos]
+    .reverse()
+    .find((item) => String(item.id) !== String(todo.id) && (String(item.id) === String(todo.rootTodoId) || String(item.rootTodoId) === String(todo.rootTodoId)) && item.status === "interrupted");
+  const previousIteration = previous ? [...state.iterations].reverse().find((iteration) => String(iteration.todoId) === String(previous.id)) : undefined;
+  const previousArtifacts = previousIteration ? `\nRelevant previous iteration artifacts: ${String(previousIteration.number).padStart(3, "0")}/handoff-in.md, ${String(previousIteration.number).padStart(3, "0")}/handoff-out.md, ${String(previousIteration.number).padStart(3, "0")}/verification.md, ${String(previousIteration.number).padStart(3, "0")}/worker-output.jsonl.\n` : "";
+  const instructions = todo.handoffInstructions ? `\nAdditional instructions:\n\n${todo.handoffInstructions}\n` : "\nAdditional instructions:\n\nNone provided.\n";
+  return `\n\n## Resolution subtask context\n\nThis todo is a resolution subtask for \`${todo.rootTodoId}\`${root ? ` (${root.title})` : ""}.\n\nThe previous attempt was incomplete/interrupted${previous ? `: \`${previous.id}\` (${previous.title}).` : "."} Inspect its handoff, verification, worker output, and current repository state before proceeding.${previousArtifacts}${instructions}\nYou must satisfy the original todo's acceptance criteria and verification standards. Passing this subtask resolves the parent chain.`;
 }
 
 function renderHandoffOut(iteration: IterationState, result: { summary: string; changedFiles: string[]; commitSubject?: string }): string {
@@ -269,6 +282,17 @@ const RalphTodoSchema = Type.Object({
   workerProvider: Type.Optional(Type.String()),
   workerContextWindow: Type.Optional(Type.Number()),
   helpRequest: Type.Optional(HelpRequestSummarySchema),
+  parentTodoId: Type.Optional(Type.String()),
+  rootTodoId: Type.Optional(Type.String()),
+  subtaskOf: Type.Optional(Type.String()),
+  inheritsVerificationFromTodoId: Type.Optional(Type.String()),
+  handoffInstructions: Type.Optional(Type.String()),
+  createdAt: Type.Optional(Type.String()),
+  createdReason: Type.Optional(Type.Literal("resolution_subtask")),
+  resolutionTodoIds: Type.Optional(Type.Array(Type.String())),
+  resolvedByTodoId: Type.Optional(Type.String()),
+  resolvedAt: Type.Optional(Type.String()),
+  resolutionReason: Type.Optional(Type.String()),
 }, { additionalProperties: false });
 
 const RunBudgetSchema = Type.Object({

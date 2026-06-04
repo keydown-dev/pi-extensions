@@ -6,7 +6,7 @@ import { slugifyLoopName } from "./paths.js";
 import { killRalphWorkerProcesses, PiJsonWorkerRunner } from "./pi-json-worker.js";
 import { ScriptedMathWorker } from "./scripted-worker.js";
 import { RalphStore } from "./store.js";
-import type { AssignTodoModelOptions, AssignTodoModelResult, DerivedLoopStatus, InsertTodoOptions, InsertTodoResult, IterationState, LoopState, RalphTodo, RequestHelpOptions, RequestHelpResult, RestartTodoOptions, RestartTodoResult, RunOptions, StartOptions, WorkerProgress } from "./types.js";
+import type { AssignTodoModelOptions, AssignTodoModelResult, DerivedLoopStatus, InsertTodoOptions, InsertTodoResult, InsertTodoSubtaskOptions, IterationState, LoopState, RalphTodo, RequestHelpOptions, RequestHelpResult, RestartTodoOptions, RestartTodoResult, RunOptions, StartOptions, WorkerProgress } from "./types.js";
 
 const DEFAULT_TODOS = ["Add subtract test and implementation", "Add multiply test and implementation", "Add divide test and implementation"];
 
@@ -87,6 +87,74 @@ export class RalphOrchestrator {
       insertAtIndex,
       dryRun: options.dryRun ?? false,
       maxIterationsChange: maxIterationsBefore === undefined ? undefined : { before: maxIterationsBefore, after: maxIterationsBefore + 1 },
+    };
+  }
+
+  async insertTodoSubtask(options: InsertTodoSubtaskOptions): Promise<InsertTodoResult> {
+    const state = await this.store.readState(slugifyLoopName(options.name));
+    assertLoopSafeForTodoInsertion(state);
+    const title = options.title.trim();
+    if (!title) throw new Error("Inserted Ralph todo title cannot be empty.");
+    const id = options.id.trim();
+    if (!id) throw new Error("Inserted Ralph todo id cannot be empty.");
+    if (state.todos.some((todo) => String(todo.id) === id)) throw new Error(`Ralph todo id already exists in ${state.name}: ${id}`);
+
+    const target = state.todos.find((todo) => String(todo.id) === String(options.insertAsSubtask));
+    if (!target) throw new Error(`Ralph todo not found in ${state.name}: ${options.insertAsSubtask}`);
+    const rootTodoId = target.rootTodoId ?? String(target.id);
+    const rootTodo = state.todos.find((todo) => String(todo.id) === rootTodoId);
+    if (!rootTodo) throw new Error(`Root Ralph todo not found in ${state.name}: ${rootTodoId}`);
+    const insertAtIndex = resolutionSubtaskInsertIndex(state, rootTodoId);
+    assertResolutionSubtaskId(id, rootTodoId, nextResolutionSubtaskNumber(state, rootTodoId));
+
+    const maxIterationsBefore = state.maxIterations;
+    const now = new Date().toISOString();
+    const insertedTodo: RalphTodo = {
+      id,
+      title,
+      status: options.status ?? "queued",
+      parentTodoId: rootTodoId,
+      rootTodoId,
+      subtaskOf: rootTodoId,
+      inheritsVerificationFromTodoId: rootTodoId,
+      ...(options.instructions?.trim() ? { handoffInstructions: options.instructions.trim() } : {}),
+      createdAt: now,
+      createdReason: "resolution_subtask",
+      ...(options.workerModel ? { workerModel: options.workerModel } : {}),
+      ...(options.workerProvider ? { workerProvider: options.workerProvider } : {}),
+      ...(options.workerContextWindow ? { workerContextWindow: options.workerContextWindow } : {}),
+    };
+    const rootWithAudit: RalphTodo = {
+      ...rootTodo,
+      status: rootTodo.status === "complete" ? rootTodo.status : "interrupted",
+      resolutionTodoIds: [...(rootTodo.resolutionTodoIds ?? []), id],
+    };
+    const nextState: LoopState = {
+      ...state,
+      control: "active",
+      todos: [
+        ...state.todos.slice(0, insertAtIndex).map((todo) => (String(todo.id) === rootTodoId ? rootWithAudit : todo)),
+        insertedTodo,
+        ...state.todos.slice(insertAtIndex).map((todo) => (String(todo.id) === rootTodoId ? rootWithAudit : todo)),
+      ],
+      maxIterations: state.maxIterations === undefined ? undefined : state.maxIterations + 1,
+      iterations: [...state.iterations],
+    };
+    prepareResolutionRunScope(nextState);
+
+    if (!options.dryRun) {
+      await this.store.writeState(nextState);
+      await this.git.addAllAndCommit(`orchestrator: insert resolution subtask ${insertedTodo.id} into ${state.name}`);
+    }
+
+    return {
+      state: nextState,
+      insertedTodo,
+      insertAtIndex,
+      dryRun: options.dryRun ?? false,
+      maxIterationsChange: maxIterationsBefore === undefined ? undefined : { before: maxIterationsBefore, after: maxIterationsBefore + 1 },
+      parentTodo: rootWithAudit,
+      rootTodo: rootWithAudit,
     };
   }
 
@@ -263,7 +331,8 @@ export class RalphOrchestrator {
   async next(name: string, options: RunOptions = {}): Promise<LoopState> {
     const state = await this.store.readState(slify(name));
     if (state.control === "paused") throw new Error(`Loop is paused: ${state.name}. Use /loop-run ${state.name} to resume and run queued work.`);
-    if (state.todos.some((todo) => todo.status === "failed" || todo.status === "interrupted")) throw new Error(`Loop needs attention before running: ${state.name}`);
+    if (loopNeedsAttentionForRun(state)) throw new Error(`Loop needs attention before running: ${state.name}`);
+    prepareResolutionRunScope(state);
     await this.git.assertCleanWorktree({ ignorePrefixes: [".loop"] });
 
     const workerMode = options.workerMode ?? "pi-json";
@@ -360,6 +429,7 @@ export class RalphOrchestrator {
     } else {
       iteration.status = result.verification.status === "passed" ? "accepted" : "failed";
       todo.status = result.verification.status === "passed" ? "complete" : "failed";
+      if (result.verification.status === "passed") resolveChainIfResolutionSubtask(state, todo);
       state.control = externallyPaused ? "paused" : "active";
       if (externallyPaused) deferQueuedTodos(state);
     }
@@ -387,7 +457,7 @@ export class RalphOrchestrator {
   async extendRun(name: string, count: number, updatedBy: "command" | "tool" = "command"): Promise<LoopState> {
     if (!Number.isInteger(count) || count <= 0) throw new Error("Run extension count must be a positive integer.");
     const state = await this.store.readState(slugifyLoopName(name));
-    if (state.todos.some((todo) => todo.status === "failed" || todo.status === "interrupted")) throw new Error(`Loop needs attention before running: ${state.name}`);
+    if (loopNeedsAttentionForRun(state)) throw new Error(`Loop needs attention before running: ${state.name}`);
     state.control = "active";
     const current = state.runBudget?.remaining ?? 0;
     state.runBudget = { remaining: current + count, updatedAt: new Date().toISOString(), updatedBy };
@@ -399,7 +469,7 @@ export class RalphOrchestrator {
   async run(name: string, options: RunOptions = {}): Promise<LoopState> {
     const max = options.maxIterations ?? 1;
     let state = await this.store.readState(slugifyLoopName(name));
-    if (state.todos.some((todo) => todo.status === "failed" || todo.status === "interrupted")) throw new Error(`Loop needs attention before running: ${state.name}`);
+    if (loopNeedsAttentionForRun(state)) throw new Error(`Loop needs attention before running: ${state.name}`);
     state.control = "active";
     state.runBudget = { remaining: max, updatedAt: new Date().toISOString(), updatedBy: "orchestrator" };
     prepareRunScope(state, max);
@@ -409,7 +479,7 @@ export class RalphOrchestrator {
     while (true) {
       state = await this.store.readState(slugifyLoopName(name));
       if (state.control !== "active") break;
-      if (state.todos.some((todo) => todo.status === "failed" || todo.status === "interrupted")) break;
+      if (loopNeedsAttentionForRun(state)) break;
       const remaining = state.runBudget?.remaining ?? 0;
       if (remaining <= 0) break;
       prepareRunScope(state, remaining);
@@ -476,8 +546,9 @@ function selectRestartTodo(state: LoopState, requestedTodoId: string | undefined
 }
 
 function hasResolutionSubtasks(state: LoopState, todoId: RalphTodo["id"]): boolean {
-  const prefix = `${String(todoId)}.`;
-  return state.todos.some((todo) => String(todo.id).startsWith(prefix));
+  const rootTodoId = String(todoId);
+  const legacyPrefix = `${rootTodoId}.`;
+  return state.todos.some((todo) => (todo.createdReason === "resolution_subtask" && String(todo.rootTodoId) === rootTodoId) || String(todo.id).startsWith(legacyPrefix));
 }
 
 function restartRescueRef(loopName: string, todoId: RalphTodo["id"]): string {
@@ -504,6 +575,10 @@ function preserveExternalRunUpdates(state: LoopState, latest: LoopState, activeT
       todo.workerModel = latestTodo.workerModel;
       todo.workerProvider = latestTodo.workerProvider;
       todo.workerContextWindow = latestTodo.workerContextWindow;
+      todo.resolutionTodoIds = latestTodo.resolutionTodoIds;
+      todo.resolvedByTodoId = latestTodo.resolvedByTodoId;
+      todo.resolvedAt = latestTodo.resolvedAt;
+      todo.resolutionReason = latestTodo.resolutionReason;
     }
   }
 }
@@ -543,7 +618,92 @@ function assertValidInsertAtIndex(state: LoopState, insertAtIndex: number): void
   }
 }
 
+function resolutionSubtaskInsertIndex(state: LoopState, rootTodoId: string): number {
+  const rootIndex = state.todos.findIndex((todo) => String(todo.id) === rootTodoId);
+  if (rootIndex === -1) throw new Error(`Root Ralph todo not found: ${rootTodoId}`);
+  let index = rootIndex + 1;
+  while (index < state.todos.length && state.todos[index]?.createdReason === "resolution_subtask" && String(state.todos[index]?.rootTodoId) === rootTodoId) index += 1;
+  return index;
+}
+
+function nextResolutionSubtaskNumber(state: LoopState, rootTodoId: string): number {
+  return state.todos.filter((todo) => todo.createdReason === "resolution_subtask" && String(todo.rootTodoId) === rootTodoId).length + 1;
+}
+
+function rootIdPrefix(rootTodoId: string): string {
+  return rootTodoId.match(/^(\d+)/)?.[1] ?? rootTodoId;
+}
+
+function assertResolutionSubtaskId(id: string, rootTodoId: string, expectedNumber: number): void {
+  const expectedPrefix = `${rootIdPrefix(rootTodoId)}.${expectedNumber}-`;
+  if (!id.startsWith(expectedPrefix)) throw new Error(`Resolution subtask id should start with ${expectedPrefix}`);
+}
+
+function unresolvedInterruptedTodos(state: LoopState): RalphTodo[] {
+  return state.todos.filter((todo) => todo.status === "interrupted" && !todo.resolvedByTodoId);
+}
+
+function pendingResolutionSubtasks(state: LoopState, rootTodoId: string): RalphTodo[] {
+  return state.todos.filter((todo) => todo.createdReason === "resolution_subtask" && String(todo.rootTodoId) === rootTodoId && (todo.status === "queued" || todo.status === "deferred" || todo.status === "running"));
+}
+
+function hasRunnableResolutionChain(state: LoopState): boolean {
+  return unresolvedInterruptedTodos(state).some((todo) => pendingResolutionSubtasks(state, String(todo.rootTodoId ?? todo.id)).length > 0);
+}
+
+function loopNeedsAttentionForRun(state: LoopState): boolean {
+  if (state.todos.some((todo) => todo.status === "failed" && todo.createdReason !== "resolution_subtask")) return true;
+  const interrupted = unresolvedInterruptedTodos(state);
+  if (interrupted.length === 0) return false;
+  return !hasRunnableResolutionChain(state);
+}
+
+function earliestRunnableResolutionRoot(state: LoopState): string | undefined {
+  for (const todo of state.todos) {
+    if (todo.status !== "interrupted") continue;
+    const rootTodoId = String(todo.rootTodoId ?? todo.id);
+    if (pendingResolutionSubtasks(state, rootTodoId).length > 0) return rootTodoId;
+  }
+  return undefined;
+}
+
+function prepareResolutionRunScope(state: LoopState): boolean {
+  const rootTodoId = earliestRunnableResolutionRoot(state);
+  if (!rootTodoId) return false;
+  let queuedOne = false;
+  for (const todo of state.todos) {
+    if (todo.createdReason !== "resolution_subtask") {
+      if (todo.status === "queued") todo.status = "deferred";
+      continue;
+    }
+    if (String(todo.rootTodoId) === rootTodoId && !queuedOne && (todo.status === "queued" || todo.status === "deferred")) {
+      todo.status = "queued";
+      queuedOne = true;
+    } else if (todo.status === "queued") {
+      todo.status = "deferred";
+    }
+  }
+  return true;
+}
+
+function resolveChainIfResolutionSubtask(state: LoopState, todo: RalphTodo): void {
+  if (todo.createdReason !== "resolution_subtask" || !todo.rootTodoId) return;
+  const rootTodoId = String(todo.rootTodoId);
+  const resolvedAt = new Date().toISOString();
+  for (const item of state.todos) {
+    const inChain = String(item.id) === rootTodoId || (item.createdReason === "resolution_subtask" && String(item.rootTodoId) === rootTodoId);
+    if (!inChain) continue;
+    if (item.status === "interrupted" || String(item.id) === String(todo.id)) item.status = "complete";
+    if (String(item.id) !== String(todo.id)) {
+      item.resolvedByTodoId = String(todo.id);
+      item.resolvedAt = resolvedAt;
+      item.resolutionReason = "Resolved by subtask after clarification";
+    }
+  }
+}
+
 function prepareRunScope(state: LoopState, max: number): void {
+  if (prepareResolutionRunScope(state)) return;
   const queued = state.todos.filter((todo) => todo.status === "queued");
   if (queued.length > max) {
     let kept = 0;
@@ -567,7 +727,8 @@ function prepareRunScope(state: LoopState, max: number): void {
 
 export function deriveLoopStatus(state: LoopState): DerivedLoopStatus {
   if (state.todos.some((todo) => todo.status === "running")) return "running";
-  if (state.todos.some((todo) => todo.status === "failed" || todo.status === "interrupted")) return "needs_attention";
+  if (state.todos.some((todo) => todo.status === "failed" && todo.createdReason !== "resolution_subtask")) return "needs_attention";
+  if (state.todos.some((todo) => todo.status === "interrupted") && !hasRunnableResolutionChain(state)) return "needs_attention";
   if (state.control === "paused") return "paused";
   if (state.todos.some((todo) => todo.status === "queued" || todo.status === "deferred")) return "ready";
   return "completed";

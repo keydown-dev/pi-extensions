@@ -55,6 +55,7 @@ Agent tools:
 - `subagent_loop_start`
 - `subagent_loop_run`
 - `subagent_loop_insert_todo`
+- `subagent_loop_insert_todo_subtask`
 - `subagent_loop_assign_todo_model`
 - `subagent_loop_request_help`
 - `subagent_loop_restart`
@@ -66,6 +67,8 @@ Agent tools:
 The run tool/command returns immediately after starting background orchestration, so the parent/orchestrator chat remains available while the Subagent Loop widget streams progress. Calling it again while the same loop is running adds to `runBudget.remaining`; the active loop picks up that persisted budget after the current worker exits.
 
 `subagent_loop_insert_todo` safely inserts a new todo at a stable `insertAtIndex` without renumbering existing todos or completed iteration references. Todo IDs are semantic identity, not list positions; execution order follows the persisted todo array. The insert tool refuses to run while any todo/iteration is `running`, defaults the inserted todo to `deferred`, requires a caller-provided semantic ID such as `ISSUE-005.1`, increments `maxIterations` when present, updates both `state.json` and `plan.md`, can include a per-todo `model`, and supports `dryRun: true` for preview.
+
+`subagent_loop_insert_todo_subtask` continues unfinished work by inserting a visible flat resolution subtask such as `005.1-finish-auth-after-answer` after its interrupted parent/root chain. Resolution subtasks default to `queued`, inherit the original todo's acceptance criteria and verification burden, store rich audit metadata/instructions, and keep the parent `interrupted` until a subtask completes with `Status: passed`. Passing a resolution subtask marks earlier interrupted chain members complete and records `resolvedByTodoId`/`resolvedAt`; failed or not-run subtasks do not resolve the parent. The tool supports `dryRun: true` to preview placement, metadata, and status changes.
 
 `subagent_loop_request_help` is for fresh-context workers blocked by ambiguity, missing requirements, unclear ownership, or a decision that should not be guessed. It writes `help-request.md` and `help-request.json` in the active iteration directory, stores a compact open help summary on state, pauses the loop, marks the current todo `interrupted`, and tells the worker to finish artifacts with `Status: not_run` and stop. The orchestrator should resolve the request later and insert an explicit resolution subtask rather than resuming the same worker.
 
@@ -92,7 +95,7 @@ task.helpRequest?: { id: string; iteration: number; question: string; artifactPa
 Display status is derived:
 
 - `running`: any task is running
-- `needs_attention`: any task failed or was interrupted
+- `needs_attention`: any normal task failed, or an interrupted chain has no queued/running resolution subtask
 - `paused`: control is paused and no task is running
 - `ready`: control is active and queued or deferred work remains
 - `completed`: no queued/running/deferred/failed/interrupted work remains
@@ -104,6 +107,7 @@ Display status is derived:
 - **Pause**: set loop control to `paused`, clear the active run budget, and defer queued work. If a worker is already running, let it finish the current task, then do not start another task.
 - **Resume**: there is no resume command. Running again (`/loop-run`) sets control to `active` and picks queued work.
 - **Kill**: send `SIGTERM` to active child `pi --mode json` workers. The loop is paused. If non-loop worktree changes are detected, the running task becomes `interrupted`; otherwise it can return to `queued`. Inspect loop status and `git status` before running again.
+- **Resolution subtask**: for continue-like recovery, insert a flat sibling subtask with `subagent_loop_insert_todo_subtask`. Only the earliest unresolved chain is runnable; later unrelated todos stay blocked until that chain passes.
 - **Restart**: for a `failed` or `interrupted` todo, create a rescue ref at current `HEAD`, reset hard to that todo attempt's `beforeRef`, mark the same todo `queued`, and preserve historical iteration records. Restart discards the current visible attempt; use inserted resolution subtasks for continue-like recovery. Dry-run restart first unless the user explicitly asked for an immediate reset.
 
 ## Artifacts, identity, and git policy

@@ -28,6 +28,17 @@ export interface RalphTodo {
   workerProvider?: string;
   workerContextWindow?: number;
   helpRequest?: HelpRequestSummary;
+  parentTodoId?: string;
+  rootTodoId?: string;
+  subtaskOf?: string;
+  inheritsVerificationFromTodoId?: string;
+  handoffInstructions?: string;
+  createdAt?: string;
+  createdReason?: "resolution_subtask";
+  resolutionTodoIds?: string[];
+  resolvedByTodoId?: string;
+  resolvedAt?: string;
+  resolutionReason?: string;
 }
 
 export type InsertTodoStatus = "queued" | "deferred";
@@ -37,6 +48,19 @@ export interface InsertTodoOptions {
   id: string;
   title: string;
   insertAtIndex?: number;
+  status?: InsertTodoStatus;
+  workerModel?: string;
+  workerProvider?: string;
+  workerContextWindow?: number;
+  dryRun?: boolean;
+}
+
+export interface InsertTodoSubtaskOptions {
+  name: string;
+  insertAsSubtask: string;
+  id: string;
+  title: string;
+  instructions?: string;
   status?: InsertTodoStatus;
   workerModel?: string;
   workerProvider?: string;
@@ -105,6 +129,8 @@ export interface InsertTodoResult {
   insertAtIndex: number;
   dryRun: boolean;
   maxIterationsChange?: { before: number; after: number };
+  parentTodo?: RalphTodo;
+  rootTodo?: RalphTodo;
 }
 
 export interface VerificationRecord {

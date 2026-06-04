@@ -379,6 +379,32 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.registerTool({
+    name: "subagent_loop_insert_todo_subtask",
+    label: "Insert Resolution Subtask",
+    description: "Insert a queued resolution subtask for an interrupted or unfinished Subagent Loop todo.",
+    promptSnippet: "Continue unfinished work by inserting a visible resolution subtask that inherits the parent todo's acceptance criteria.",
+    parameters: Type.Object({
+      name: Type.Optional(Type.String({ description: "Loop name. Defaults to the current active loop when available." })),
+      insertAsSubtask: Type.String({ description: "Original root todo ID or blocked subtask ID to resolve." }),
+      id: Type.String({ description: "Explicit semantic subtask ID, e.g. 005.1-finish-after-clarification." }),
+      title: Type.String({ description: "Title for the resolution subtask." }),
+      instructions: Type.Optional(Type.String({ description: "Additional handoff instructions for the worker." })),
+      status: Type.Optional(Type.Union([Type.Literal("queued"), Type.Literal("deferred")], { description: "Initial status. Defaults to queued." })),
+      model: Type.Optional(Type.String({ description: "Optional Pi model pattern for this subtask worker." })),
+      dryRun: Type.Optional(Type.Boolean({ description: "Preview placement, metadata, and status changes without writing." })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const name = params.name ?? currentLoop;
+      if (!name) throw new Error("No Subagent Loop name provided and no active loop is set.");
+      const loopName = slugifyLoopName(name);
+      if (activeJobs.has(loopName)) throw new Error(`Cannot insert a loop todo while loop is running: ${loopName}. Pause or wait for the active worker to finish first.`);
+      const result = await new RalphOrchestrator(ctx.cwd, packageRoot).insertTodoSubtask({ name: loopName, insertAsSubtask: params.insertAsSubtask, id: params.id, title: params.title, instructions: params.instructions, status: params.status, workerModel: params.model, workerContextWindow: resolveWorkerContextWindow(ctx, params.model), dryRun: params.dryRun });
+      if (!result.dryRun) updateUI(ctx, result.state);
+      return { content: [{ type: "text", text: renderInsertTodoResponse(result) }], details: { ...result, nextAction: result.dryRun ? "If the preview looks correct, call subagent_loop_insert_todo_subtask again with dryRun false or omitted." : nextActionForState(result.state) } };
+    },
+  });
+
+  pi.registerTool({
     name: "subagent_loop_assign_todo_model",
     label: "Assign Loop Todo Model",
     description: "Assign, update, or clear a persisted child-worker model override for a queued/deferred future loop todo.",

@@ -2,9 +2,9 @@
   "name": "subagent-loop-recovery-tools",
   "control": "active",
   "branch": "orchestrator/subagent-loop-recovery-tools",
-  "currentIteration": 3,
+  "currentIteration": 4,
   "createdAt": "2026-06-03T23:31:02.583Z",
-  "updatedAt": "2026-06-04T00:03:12.907Z",
+  "updatedAt": "2026-06-04T00:03:13.802Z",
   "maxIterations": 4,
   "workerDefaults": {
     "contextWindow": 272000
@@ -28,7 +28,7 @@
     {
       "id": "004-complete-plans-issues-016-subagent-loop-recovery",
       "title": "Complete plans/issues/016-subagent-loop-recovery-and-help-skills.md",
-      "status": "queued"
+      "status": "running"
     }
   ],
   "iterations": [
@@ -189,11 +189,18 @@
       },
       "afterRef": "ralph/subagent-loop-recovery-tools/iter-003-after",
       "completedAt": "2026-06-04T00:03:12.742Z"
+    },
+    {
+      "number": 4,
+      "status": "running",
+      "todoId": "004-complete-plans-issues-016-subagent-loop-recovery",
+      "beforeRef": "ralph/subagent-loop-recovery-tools/iter-004-before",
+      "startedAt": "2026-06-04T00:03:13.645Z"
     }
   ],
   "runBudget": {
-    "remaining": 1,
-    "updatedAt": "2026-06-03T23:49:55.933Z",
+    "remaining": 0,
+    "updatedAt": "2026-06-04T00:03:13.562Z",
     "updatedBy": "orchestrator"
   }
 }

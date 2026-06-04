@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { execFile } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import test from "node:test";
 import { extractCommitSubjectFromHandoff, handoffCommitMessage, sanitizeWorkerCommitSubject, workerCommitMessage } from "../src/commit-messages.js";
@@ -129,6 +130,39 @@ console.log(JSON.stringify({ type: "message_end", message: { role: "assistant", 
   const raw = await fs.readFile(path.join(iterationDir, "worker-output.raw.jsonl"), "utf8");
   assert.match(raw, /message_update/);
   assert.ok(raw.length > compact.length);
+});
+
+test("Subagent Loop docs and worker prompt document recovery primitives", async () => {
+  const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const readPackageFile = (relativePath: string) => fs.readFile(path.join(packageRoot, relativePath), "utf8");
+  const [planning, pickup, toolUsage, artifactProtocol, readme, protocol, workerSource] = await Promise.all([
+    readPackageFile(path.join("skills", "subagent-loop", "refs", "planning.md")),
+    readPackageFile(path.join("skills", "subagent-loop", "refs", "pickup.md")),
+    readPackageFile(path.join("skills", "subagent-loop", "refs", "tool-usage.md")),
+    readPackageFile(path.join("skills", "subagent-loop", "refs", "artifact-protocol.md")),
+    readPackageFile("README.md"),
+    readPackageFile(path.join("docs", "protocol.md")),
+    readPackageFile(path.join("src", "pi-json-worker.ts")),
+  ]);
+
+  assert.match(pickup, /subagent_loop_request_help/);
+  assert.match(pickup, /Status: not_run/);
+  assert.match(pickup, /terminal for this worker/);
+  assert.match(planning, /Clarification policy/);
+  assert.match(planning, /acceptance criteria/i);
+  assert.match(toolUsage, /Continue vs restart/);
+  assert.match(toolUsage, /subagent_loop_insert_todo_subtask/);
+  assert.match(toolUsage, /subagent_loop_restart/);
+  assert.match(artifactProtocol, /help-request\.md/);
+  assert.match(readme, /subagent_loop_request_help/);
+  assert.match(readme, /subagent_loop_restart/);
+  assert.match(protocol, /human-provided/);
+  assert.match(protocol, /orchestrator-inferred/);
+  assert.match(workerSource, /concrete question, context, blocking reason/);
+  assert.match(workerSource, /Status: not_run/);
+
+  const docs = [planning, pickup, toolUsage, artifactProtocol, readme, protocol].join("\n");
+  assert.doesNotMatch(docs, /hand-edit(?:ing)?\s+`?state\.json`?\s+(?:to|when|for)\s+(?:recover|continue|resume)/i);
 });
 
 test("commit message helpers use semantic todo identity and sanitized worker subjects", () => {

@@ -4,7 +4,7 @@
   "branch": "orchestrator/subagent-loop-recovery-tools",
   "currentIteration": 4,
   "createdAt": "2026-06-03T23:31:02.583Z",
-  "updatedAt": "2026-06-04T00:03:13.802Z",
+  "updatedAt": "2026-06-04T00:13:06.346Z",
   "maxIterations": 4,
   "workerDefaults": {
     "contextWindow": 272000
@@ -28,7 +28,7 @@
     {
       "id": "004-complete-plans-issues-016-subagent-loop-recovery",
       "title": "Complete plans/issues/016-subagent-loop-recovery-and-help-skills.md",
-      "status": "running"
+      "status": "complete"
     }
   ],
   "iterations": [
@@ -192,10 +192,56 @@
     },
     {
       "number": 4,
-      "status": "running",
+      "status": "accepted",
       "todoId": "004-complete-plans-issues-016-subagent-loop-recovery",
       "beforeRef": "ralph/subagent-loop-recovery-tools/iter-004-before",
-      "startedAt": "2026-06-04T00:03:13.645Z"
+      "startedAt": "2026-06-04T00:03:13.645Z",
+      "diff": {
+        "filesChanged": 8,
+        "insertions": 172,
+        "deletions": 15
+      },
+      "usage": {
+        "input": 103624,
+        "output": 9524,
+        "cacheRead": 855040,
+        "cacheWrite": 0,
+        "totalTokens": 968188,
+        "cost": 1.2313600000000002,
+        "contextWindow": 272000,
+        "contextTokens": 47390
+      },
+      "observedModel": "gpt-5.5",
+      "model": "gpt-5.5",
+      "observedProvider": "openai-codex",
+      "provider": "openai-codex",
+      "summary": "Completed issue 016 by updating Subagent Loop docs/skill refs and the generated worker prompt with recovery guidance for request-help, resolution subtasks, restart, clarification policy, and orchestrator help-request handling. Added a static regression test that checks the docs and worker prompt mention the required recovery primitives and avoid recommending normal hand-edits to `state.json`.",
+      "changedFiles": [
+        "packages/loops/README.md",
+        "packages/loops/docs/protocol.md",
+        "packages/loops/skills/subagent-loop/refs/artifact-protocol.md",
+        "packages/loops/skills/subagent-loop/refs/pickup.md",
+        "packages/loops/skills/subagent-loop/refs/planning.md",
+        "packages/loops/skills/subagent-loop/refs/tool-usage.md",
+        "packages/loops/src/pi-json-worker.ts",
+        "packages/loops/tests/orchestrator.test.ts",
+        ".ralph/orchestrator/loops/subagent-loop-recovery-tools/iterations/004/verification.md",
+        ".ralph/orchestrator/loops/subagent-loop-recovery-tools/iterations/004/handoff-out.md",
+        ".ralph/orchestrator/loops/subagent-loop-recovery-tools/iterations/004/worker-output.jsonl"
+      ],
+      "commitSubject": "feat: document subagent loop recovery workflows",
+      "verification": {
+        "status": "passed",
+        "commands": [
+          {
+            "command": "worker-reported verification",
+            "exitCode": 0,
+            "summary": "# Verification\n\nStatus: passed\n\n## Commands\n\n```bash\nrg -n 'hand-edit(ing)?\\s+`?state\\.json`?\\s+(to|when|for)\\s+(recover|continue|resume)' packages/loops/README.md packages/loops/docs packages/loops/skills || true\n```\n\nResult: passed; no matching recommendation found.\n\n```bash\nnpm --prefix packages/loops test -- --test-name-pattern \"Subagent Loop docs and worker prompt\"\n```\n\nResult: passed; 55 tests passed. Note: this project/node invocation ran the full package test suite despite the name pattern.\n\n```bash\nnpm --prefix packages/loops run typecheck\n```\n\nResult: passed; `tsc --noEmit` completed successfully."
+          }
+        ]
+      },
+      "afterRef": "ralph/subagent-loop-recovery-tools/iter-004-after",
+      "completedAt": "2026-06-04T00:13:06.242Z"
     }
   ],
   "runBudget": {

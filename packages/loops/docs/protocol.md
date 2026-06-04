@@ -139,12 +139,14 @@ Orchestrator responsibilities:
 - Enforce clean-worktree and commit policy.
 - Parse worker-produced `handoff-out.md`, `verification.md`, compact usage, changed files, and optional commit subject.
 - Keep raw traces out of durable commits.
+- During loop planning, capture verification standards, per-todo acceptance criteria when known, anticipated ambiguity, and a plain-text clarification policy in the loop packet.
+- Resolve worker help requests according to that clarification policy and insert visible resolution subtasks instead of hand-editing state.
 
 Worker responsibilities:
 
 - Read only the assigned `handoff-in.md` first, then inspect referenced files or the minimum necessary local context.
 - Complete exactly the assigned todo slice.
-- If blocked by ambiguity, missing requirements, unclear ownership, or a decision that should not be guessed, call `subagent_loop_request_help` with a focused question and useful context, then write final artifacts with `Status: not_run` and stop.
+- If blocked by ambiguity, missing requirements, unclear ownership, unclear verification, or a decision that should not be guessed, call `subagent_loop_request_help` with a focused question and useful context, then write final artifacts with `Status: not_run` and stop.
 - Write `verification.md` with commands/results and a status line.
 - Write `handoff-out.md` with these parseable sections:
   - `## Summary`: concise outcome or blocker.
@@ -169,6 +171,16 @@ When a resolution subtask runs, `handoff-in.md` includes the root todo, previous
 On success, it writes `help-request.md` and `help-request.json` in the active iteration directory, stores a compact `helpRequest` summary/link on the running todo and iteration, sets loop control to `paused`, marks the todo `interrupted`, and marks the iteration `aborted` with `Status: not_run`. The worker must then write `handoff-out.md`, write `verification.md` with `Status: not_run`, and stop. When the worker exits, the orchestrator preserves the interrupted/help-request state instead of converting the todo to `failed` merely because verification was not run. Status output includes the open question and artifact path.
 
 The orchestrator/human should answer the question later and insert a visible resolution subtask with `subagent_loop_insert_todo_subtask`; the help tool does not resume the same worker and does not automatically create follow-up todos.
+
+Help request resolution protocol:
+
+1. Inspect loop status and the linked help-request artifacts.
+2. Consult the loop packet's plain-text clarification policy.
+3. Answer from existing project context only if the policy permits and confidence is high.
+4. Ask the human when confidence is low or the decision involves product direction, architecture tradeoffs, security, irreversible changes, or ambiguous ownership.
+5. Record whether the answer was `human-provided` or `orchestrator-inferred` in the resolution subtask instructions.
+6. Include the blocking question, answer, relevant artifact paths/iterations, and a reminder that original acceptance criteria and verification standards still apply.
+7. Run the loop for the resolution subtask.
 
 ## Todo restart
 

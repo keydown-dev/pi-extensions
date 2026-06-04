@@ -91,20 +91,53 @@ Potential locations:
 - `README.md`
 - project-specific planning, canon, continuity, or standards files
 
+## Recovery-aware loop packet
+
+Before starting a loop, build enough of the packet that fresh workers can make progress without guessing and know when to stop. Use a short interview process:
+
+1. Draft the loop packet from the user's goal and known constraints.
+2. Anticipate likely worker ambiguities, missing requirements, and ownership questions.
+3. Ask clarifying questions up front where ambiguity is likely to block workers.
+4. Capture loop-wide verification standards and per-todo acceptance criteria when known.
+5. Ask for a loop-wide clarification policy.
+6. Iterate on the packet with the user until the important ambiguity is resolved or explicitly deferred.
+7. Confirm before starting the loop.
+
+Clarification policy is plain text in the loop packet for now, not a state field or separate tool. Ask a question like:
+
+> If workers request clarification, may the orchestrator answer from project context when confident, or should it always ask you?
+
+Useful policy examples:
+
+```md
+## Clarification policy
+
+The orchestrator may answer worker clarification requests from project context when confident.
+Ask the human when the question involves product direction, architecture tradeoffs, security, irreversible changes, or low confidence.
+Record whether each clarification was human-provided or orchestrator-inferred.
+```
+
+```md
+## Clarification policy
+
+Always ask the human before answering worker clarification requests.
+```
+
 ## Planning behavior
 
 1. Restate the user's goal and known constraints.
 2. Ask what planning/interview process or skill they want to use, unless already clear.
 3. Ask whether iterations should be completed by the current orchestrator LLM, assigned to subagents, or mixed per todo.
 4. Ask which skills/processes/reference files/verification standards should govern the loop.
-5. Explore workspace files when that answers a question better than asking.
-6. Separate loop-specific instructions from durable project/workspace context.
-7. Draft the loop packet.
-8. Ask for approval or changes.
-9. Only after approval, call `subagent_loop_start`.
-10. Tell the user the loop is ready but not executing yet.
-11. If the user wants to proceed and tools are available, use `subagent_loop_run` for a bounded run; for one iteration use `maxIterations: 1`. Otherwise tell them to use `/loop-run <name> --max N`.
-12. Use `subagent_loop_status` or `subagent_loop_list` to inspect progress instead of reading extension code.
+5. Ask for acceptance criteria for known todos and a loop-wide clarification policy.
+6. Explore workspace files when that answers a question better than asking.
+7. Separate loop-specific instructions from durable project/workspace context.
+8. Draft the loop packet, including anticipated ambiguity and stop/request-help conditions.
+9. Ask for approval or changes.
+10. Only after approval, call `subagent_loop_start`.
+11. Tell the user the loop is ready but not executing yet.
+12. If the user wants to proceed and tools are available, use `subagent_loop_run` for a bounded run; for one iteration use `maxIterations: 1`. Otherwise tell them to use `/loop-run <name> --max N`.
+13. Use `subagent_loop_status` or `subagent_loop_list` to inspect progress instead of reading extension code.
 
 ## Suggested questions
 
@@ -116,6 +149,8 @@ Ask one at a time. Include your recommended answer when useful.
 - "Which skills should iteration executors invoke during execution? My recommendation: list only skills that change behavior, not every available skill."
 - "Which files are mandatory context for workers? My recommendation: keep this short and durable — context docs, ADRs, issue lists, style guides, or continuity notes."
 - "What verification proves an iteration is done? My recommendation: include both machine checks and any human-review criteria."
+- "What acceptance criteria should each known todo satisfy? My recommendation: capture concrete success conditions now where you already know them."
+- "If workers request clarification, may I answer from project context when confident, or should I always ask you? My recommendation: let the orchestrator answer from context only when confidence is high and the decision is not product, architecture, security, ownership, or irreversible."
 - "What information belongs in project docs rather than only in the Subagent Loop? My recommendation: durable standards, architecture decisions, and continuity/canon facts."
 
 ## Output format before approval
@@ -147,6 +182,16 @@ When ready, present:
 - Allowed paths:
 - Forbidden/out-of-scope work:
 - Stop/ask-user conditions:
+
+## Stop / Request-Help Conditions
+- When workers should call `subagent_loop_request_help` instead of guessing:
+
+## Clarification Policy
+- May the orchestrator answer from context? When must it ask the human?
+- Record answer source as human-provided or orchestrator-inferred.
+
+## Anticipated Ambiguity
+- Likely worker questions and planned answers or escalation rules:
 
 ## Iteration Todos / Issues
 - [ ] ... — executor: orchestrator | subagent; model: default/current

@@ -40,7 +40,7 @@ The monorepo root manifest points at this package's extension and skill director
 | `/loop-list` | List all loops under `.loop/orchestrator/loops/`. |
 | `/loop-widget [toggle\|compact\|expand\|show\|hide]` | Set Subagent Loop widget mode. |
 
-Resume by running again with `/loop-run`; run one task with `/loop-run --max 1`.
+Resume by running again with `/loop-run`; run one task with `/loop-run --max 1`. Do not hand-edit `state.json` for normal recovery; use `/loop-restart` for destructive retry or `subagent_loop_insert_todo_subtask` for continue-like resolution.
 
 Runner modes:
 
@@ -70,7 +70,9 @@ The run tool/command returns immediately after starting background orchestration
 
 `subagent_loop_insert_todo_subtask` continues unfinished work by inserting a visible flat resolution subtask such as `005.1-finish-auth-after-answer` after its interrupted parent/root chain. Resolution subtasks default to `queued`, inherit the original todo's acceptance criteria and verification burden, store rich audit metadata/instructions, and keep the parent `interrupted` until a subtask completes with `Status: passed`. Passing a resolution subtask marks earlier interrupted chain members complete and records `resolvedByTodoId`/`resolvedAt`; failed or not-run subtasks do not resolve the parent. The tool supports `dryRun: true` to preview placement, metadata, and status changes.
 
-`subagent_loop_request_help` is for fresh-context workers blocked by ambiguity, missing requirements, unclear ownership, or a decision that should not be guessed. It writes `help-request.md` and `help-request.json` in the active iteration directory, stores a compact open help summary on state, pauses the loop, marks the current todo `interrupted`, and tells the worker to finish artifacts with `Status: not_run` and stop. The orchestrator should resolve the request later and insert an explicit resolution subtask rather than resuming the same worker.
+`subagent_loop_request_help` is for fresh-context workers blocked by ambiguity, missing requirements, unclear ownership, unclear verification, or a decision that should not be guessed. It writes `help-request.md` and `help-request.json` in the active iteration directory, stores a compact open help summary on state, pauses the loop, marks the current todo `interrupted`, and tells the worker to finish artifacts with `Status: not_run` and stop. The orchestrator should resolve the request later and insert an explicit resolution subtask rather than resuming the same worker.
+
+When resolving help requests, inspect status and the help artifacts, then follow the loop packet's clarification policy. The orchestrator may answer from project context only when policy permits and confidence is high; ask the human for product direction, architecture tradeoffs, security or irreversible decisions, ambiguous ownership, or low confidence. Record the answer source (`human-provided` or `orchestrator-inferred`) in the resolution subtask instructions along with the decision, prior artifact paths, and a reminder that the parent acceptance criteria and verification standards still apply.
 
 Worker model precedence is: todo override (`todo.workerModel`) → loop default (`loop.workerDefaults.model`) → run-level fallback (`/loop-run --model` or tool `model`) → current/default Pi model. The loop persists the effective configured model on the iteration before launching the child worker and records observed model/provider when the worker reports them. `subagent_loop_assign_todo_model` can update or clear queued/deferred future todo overrides, but refuses the currently running todo so an active child worker's launch model cannot change mid-flight.
 

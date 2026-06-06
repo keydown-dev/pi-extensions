@@ -16,13 +16,40 @@ npm run typecheck
 npm test
 ```
 
-Install from a local checkout with:
+## Install in Pi
+
+Install the extensions directly from Git with either SSH or HTTPS:
+
+```bash
+# SSH, uses your configured GitHub SSH key
+pi install git:git@github.com:keydown-dev/pi-extensions
+
+# HTTPS
+pi install https://github.com/keydown-dev/pi-extensions
+```
+
+To pin the install to a tag or commit, append `@<ref>`:
+
+```bash
+pi install git:git@github.com:keydown-dev/pi-extensions@v0.1.0
+pi install https://github.com/keydown-dev/pi-extensions@<commit-sha>
+```
+
+By default, Pi installs packages globally under `~/.pi/agent/git/` and records them in `~/.pi/agent/settings.json`. For a project-local install that is recorded in `.pi/settings.json`, add `-l`:
+
+```bash
+pi install -l git:git@github.com:keydown-dev/pi-extensions
+```
+
+After installing, restart Pi or run `/reload`. Use `pi list` to confirm the package is installed and `pi config` to enable or disable resources from the package.
+
+For local development from a checkout:
 
 ```bash
 pi install .
 ```
 
-For package-specific local development, you can target an individual package directory:
+You can also target an individual package directory:
 
 ```bash
 pi install ./packages/loops

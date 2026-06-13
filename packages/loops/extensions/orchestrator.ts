@@ -4,7 +4,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Type } from "typebox";
 import { deriveLoopStatus, RalphOrchestrator, renderLoopList, renderStatus } from "../src/orchestrator.js";
 import { slugifyLoopName } from "../src/paths.js";
-import type { InsertTodoResult, IterationCompleteEvent, LoopState, OrchestratorProgress, RestartTodoResult, WorkerMode, WorkerProgress, WorkerUsage } from "../src/types.js";
+import type { InsertTodoResult, IterationCompleteEvent, LoopCommitMode, LoopState, OrchestratorProgress, RestartTodoResult, WorkerMode, WorkerProgress, WorkerUsage } from "../src/types.js";
 
 let currentLoop: string | null = null;
 type RalphWidgetMode = "compact" | "expanded" | "hidden";
@@ -116,7 +116,7 @@ export default function (pi: ExtensionAPI) {
     const name = argv.shift();
     if (!name) throw new Error("Usage: /loop-start <name> [--max N] [--todo item ...]");
     const defaultWorkerModel = parseModel(argv);
-    const state = await new RalphOrchestrator(ctx.cwd, packageRoot).start({ name, todos: parseTodos(argv), maxIterations: parseMax(argv), defaultWorkerModel, defaultWorkerContextWindow: resolveWorkerContextWindow(ctx, defaultWorkerModel) });
+    const state = await new RalphOrchestrator(ctx.cwd, packageRoot).start({ name, todos: parseTodos(argv), maxIterations: parseMax(argv), defaultWorkerModel, defaultWorkerContextWindow: resolveWorkerContextWindow(ctx, defaultWorkerModel), ...parseGitPreferences(argv) });
     setCurrent(ctx, state);
     ctx.ui.notify(`Prepared Subagent Loop: ${state.name}. Use /loop-run ${state.name} to run queued work.`, "info");
   }
@@ -309,10 +309,14 @@ export default function (pi: ExtensionAPI) {
       maxIterations: Type.Optional(Type.Number({ description: "Maximum number of tasks in the initial run scope" })),
       defaultWorkerModel: Type.Optional(Type.String({ description: "Loop-level default Pi model pattern/ID for child workers." })),
       todos: Type.Optional(Type.Array(Type.String(), { description: "Concrete checklist items extracted from taskContent" })),
+      commitMode: Type.Optional(Type.Union([Type.Literal("per_iteration"), Type.Literal("manual")], { description: "Git commit behavior: per_iteration auto-commits loop/worker checkpoints, manual never commits automatically." })),
+      requireCleanWorktree: Type.Optional(Type.Boolean({ description: "Whether loop start/run should require a clean worktree outside loop artifacts." })),
+      commitConvention: Type.Optional(Type.String({ description: "Commit message convention workers should follow. Defaults to inferred git history or Conventional Commits." })),
+      ignoreWorkerLogs: Type.Optional(Type.Boolean({ description: "Whether compact and raw sub-agent LLM logs should be ignored by default." })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const todos = params.todos?.length ? params.todos : extractTodos(params.taskContent);
-      const state = await new RalphOrchestrator(ctx.cwd, packageRoot).start({ name: params.name, todos, maxIterations: params.maxIterations, defaultWorkerModel: params.defaultWorkerModel, defaultWorkerContextWindow: resolveWorkerContextWindow(ctx, params.defaultWorkerModel) });
+      const state = await new RalphOrchestrator(ctx.cwd, packageRoot).start({ name: params.name, todos, maxIterations: params.maxIterations, defaultWorkerModel: params.defaultWorkerModel, defaultWorkerContextWindow: resolveWorkerContextWindow(ctx, params.defaultWorkerModel), commitMode: params.commitMode, requireCleanWorktree: params.requireCleanWorktree, commitConvention: params.commitConvention, ignoreWorkerLogs: params.ignoreWorkerLogs });
       setCurrent(ctx, state);
       return { content: [{ type: "text", text: renderToolResponse(state, `Created Subagent Loop "${state.name}" with ${state.todos.length} todos.`) }], details: { state, nextAction: nextActionForState(state) } };
     },
@@ -567,7 +571,7 @@ const HELP = `Subagent Loop - fresh-context development loops
 
 Primary commands:
   /loop-plan <goal>                               Plan/grill a loop before starting
-  /loop-start <name> [--max N] [--model MODEL] [--todo item ...] Start a loop
+  /loop-start <name> [--max N] [--model MODEL] [--manual-commits] [--allow-dirty] [--todo item ...] Start a loop
   /loop-run [name] [--max N] [--runner pi-json] [--model MODEL] Run queued work; resumes a paused loop
   /loop-assign-model <loop> <todo-id> [--model MODEL] Assign/clear future todo worker model
   /loop-pause [name]                              Pause after the current worker exits
@@ -582,7 +586,7 @@ Natural usage:
 
 function buildPlanPrompt(request: string): string {
   const goal = request || "Plan a Subagent Loop for the work I want to accomplish.";
-  return `/skill:subagent-loop ${goal}`;
+  return `/skill:subagent-loop ${goal}\n\nDuring packet generation, ask for Git/artifact preferences: automatic per-iteration commits vs manual/no automatic commits, whether each issue should independently commit, clean-worktree policy, commit convention (recommend detected Git history style; fall back to Conventional Commits), and whether raw plus compacted sub-agent LLM logs should be ignored (default yes for new projects, persisted in .loops/config.json).`;
 }
 
 function splitArgs(input: string): string[] {
@@ -593,6 +597,24 @@ function parseTodos(args: string[]): string[] | undefined {
   const todoIndex = args.indexOf("--todo");
   if (todoIndex === -1) return undefined;
   return args.slice(todoIndex + 1).filter((arg) => !arg.startsWith("--"));
+}
+
+function parseGitPreferences(args: string[]): { commitMode?: LoopCommitMode; requireCleanWorktree?: boolean; commitConvention?: string; ignoreWorkerLogs?: boolean } {
+  const commitMode = args.includes("--manual-commits") ? "manual" : args.includes("--per-iteration-commits") ? "per_iteration" : undefined;
+  return {
+    ...(commitMode ? { commitMode: commitMode as LoopCommitMode } : {}),
+    ...(args.includes("--allow-dirty") ? { requireCleanWorktree: false } : {}),
+    ...(args.includes("--require-clean") ? { requireCleanWorktree: true } : {}),
+    ...(args.includes("--track-worker-logs") ? { ignoreWorkerLogs: false } : {}),
+    ...(args.includes("--ignore-worker-logs") ? { ignoreWorkerLogs: true } : {}),
+    ...(parseFlagValue(args, "--commit-convention") ? { commitConvention: parseFlagValue(args, "--commit-convention") } : {}),
+  };
+}
+
+function parseFlagValue(args: string[], flag: string): string | undefined {
+  const index = args.indexOf(flag);
+  if (index === -1) return undefined;
+  return args[index + 1];
 }
 
 function parseRunner(args: string[]): WorkerMode {

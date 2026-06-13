@@ -6,7 +6,7 @@ import { slugifyLoopName } from "./paths.js";
 import { killRalphWorkerProcesses, PiJsonWorkerRunner } from "./pi-json-worker.js";
 import { ScriptedMathWorker } from "./scripted-worker.js";
 import { RalphStore } from "./store.js";
-import type { AssignTodoModelOptions, AssignTodoModelResult, DerivedLoopStatus, InsertTodoOptions, InsertTodoResult, InsertTodoSubtaskOptions, IterationState, LoopState, RalphTodo, RequestHelpOptions, RequestHelpResult, RestartTodoOptions, RestartTodoResult, RunOptions, StartOptions, WorkerProgress } from "./types.js";
+import type { AssignTodoModelOptions, AssignTodoModelResult, DerivedLoopStatus, InsertTodoOptions, InsertTodoResult, InsertTodoSubtaskOptions, IterationState, LoopGitPreferences, LoopState, RalphTodo, RequestHelpOptions, RequestHelpResult, RestartTodoOptions, RestartTodoResult, RunOptions, StartOptions, WorkerProgress } from "./types.js";
 
 const DEFAULT_TODOS = ["Add subtract test and implementation", "Add multiply test and implementation", "Add divide test and implementation"];
 
@@ -23,7 +23,8 @@ export class RalphOrchestrator {
     const name = slugifyLoopName(options.name);
     await this.git.assertRepo();
     if (await this.store.exists(name)) throw new Error(`Ralph loop already exists: ${name}`);
-    await this.git.assertCleanWorktree({ ignorePrefixes: [".loop"] });
+    const gitPreferences = await this.resolveStartGitPreferences(options);
+    if (gitPreferences.requireCleanWorktree) await this.git.assertCleanWorktree({ ignorePrefixes: loopIgnoredPrefixes() });
 
     const branch = orchestrationBranch(name);
     await this.git.checkoutBranch(branch);
@@ -32,8 +33,8 @@ export class RalphOrchestrator {
       ...(options.defaultWorkerProvider ? { provider: options.defaultWorkerProvider } : {}),
       ...(options.defaultWorkerContextWindow ? { contextWindow: options.defaultWorkerContextWindow } : {}),
     };
-    const state = await this.store.createLoop(name, options.todos?.length ? options.todos : DEFAULT_TODOS, branch, options.maxIterations, workerDefaults);
-    await this.git.addAllAndCommit(`orchestrator: start ${name}`);
+    const state = await this.store.createLoop(name, options.todos?.length ? options.todos : DEFAULT_TODOS, branch, options.maxIterations, workerDefaults, gitPreferences);
+    await this.commitIfEnabled(state, `orchestrator: start ${name}`);
     return state;
   }
 
@@ -78,7 +79,7 @@ export class RalphOrchestrator {
 
     if (!options.dryRun) {
       await this.store.writeState(nextState);
-      await this.git.addAllAndCommit(`orchestrator: insert todo ${insertedTodo.id} into ${state.name}`);
+      await this.commitIfEnabled(nextState, `orchestrator: insert todo ${insertedTodo.id} into ${state.name}`);
     }
 
     return {
@@ -144,7 +145,7 @@ export class RalphOrchestrator {
 
     if (!options.dryRun) {
       await this.store.writeState(nextState);
-      await this.git.addAllAndCommit(`orchestrator: insert resolution subtask ${insertedTodo.id} into ${state.name}`);
+      await this.commitIfEnabled(nextState, `orchestrator: insert resolution subtask ${insertedTodo.id} into ${state.name}`);
     }
 
     return {
@@ -182,7 +183,7 @@ export class RalphOrchestrator {
     if (!options.dryRun) {
       await this.store.writeState(nextState);
       if (!state.iterations.some((iteration) => iteration.status === "running")) {
-        await this.git.addAllAndCommit(`orchestrator: assign model for ${todo.id} in ${state.name}`);
+        await this.commitIfEnabled(nextState, `orchestrator: assign model for ${todo.id} in ${state.name}`);
       }
     }
     return { state: nextState, todo: nextTodo, dryRun: options.dryRun ?? false, cleared };
@@ -195,7 +196,7 @@ export class RalphOrchestrator {
     deferQueuedTodos(state);
     await this.store.writeState(state);
     if (!state.iterations.some((iteration) => iteration.status === "running")) {
-      await this.git.addAllAndCommit(`orchestrator: pause ${state.name}`);
+      await this.commitIfEnabled(state, `orchestrator: pause ${state.name}`);
     }
     return state;
   }
@@ -217,7 +218,7 @@ export class RalphOrchestrator {
 
     const head = await this.git.headRef();
     const rescueRef = restartRescueRef(state.name, todo.id);
-    const worktreeDirty = await this.git.isWorktreeDirty({ ignorePrefixes: [".loop"] });
+    const worktreeDirty = await this.git.isWorktreeDirty({ ignorePrefixes: loopIgnoredPrefixes() });
     const nextState: LoopState = {
       ...state,
       control: "active",
@@ -232,7 +233,7 @@ export class RalphOrchestrator {
       await this.git.createRef(rescueRef, "HEAD");
       await this.git.resetHard(before);
       await this.store.writeState(nextState);
-      await this.git.addAllAndCommit(`orchestrator: restart ${todo.id} in ${state.name}`);
+      await this.commitIfEnabled(nextState, `orchestrator: restart ${todo.id} in ${state.name}`);
     }
 
     return {
@@ -248,6 +249,27 @@ export class RalphOrchestrator {
     };
   }
 
+
+  private async resolveStartGitPreferences(options: StartOptions): Promise<LoopGitPreferences> {
+    const existing = await this.store.readProjectConfig();
+    const base = existing?.git ?? {
+      commitMode: "per_iteration" as const,
+      requireCleanWorktree: true,
+      commitConvention: await this.git.inferCommitConvention(),
+      ignoreWorkerLogs: true,
+    };
+    return {
+      commitMode: options.commitMode ?? base.commitMode,
+      requireCleanWorktree: options.requireCleanWorktree ?? base.requireCleanWorktree,
+      commitConvention: options.commitConvention?.trim() || base.commitConvention,
+      ignoreWorkerLogs: options.ignoreWorkerLogs ?? base.ignoreWorkerLogs,
+    };
+  }
+
+  private async commitIfEnabled(state: LoopState, message: string): Promise<boolean> {
+    if ((state.git?.commitMode ?? "per_iteration") === "manual") return false;
+    return this.git.addAllAndCommit(message, { ignoreWorkerLogs: state.git?.ignoreWorkerLogs ?? true });
+  }
 
   async requestHelp(options: RequestHelpOptions): Promise<RequestHelpResult> {
     if (!options.question.trim()) throw new Error("Help request question cannot be empty.");
@@ -307,7 +329,7 @@ export class RalphOrchestrator {
     const state = await this.store.readState(slugifyLoopName(name));
     const killed = killRalphWorkerProcesses(state.name);
     state.control = "paused";
-    const hasWorkerChanges = (await this.git.changedPaths()).some((filePath) => !filePath.startsWith(".loop/"));
+    const hasWorkerChanges = (await this.git.changedPaths()).some((filePath) => !isLoopInternalPath(filePath));
     for (const todo of state.todos) {
       if (todo.status === "running") todo.status = hasWorkerChanges ? "interrupted" : "queued";
     }
@@ -315,7 +337,7 @@ export class RalphOrchestrator {
       if (iteration.status === "running") {
         iteration.status = "aborted";
         iteration.completedAt = new Date().toISOString();
-        iteration.diff = { filesChanged: hasWorkerChanges ? (await this.git.changedPaths()).filter((filePath) => !filePath.startsWith(".loop/")).length : 0, insertions: 0, deletions: 0 };
+        iteration.diff = { filesChanged: hasWorkerChanges ? (await this.git.changedPaths()).filter((filePath) => !isLoopInternalPath(filePath)).length : 0, insertions: 0, deletions: 0 };
         iteration.verification = {
           status: "failed",
           commands: [{ command: "loop-kill", exitCode: killed > 0 ? 143 : 0, summary: hasWorkerChanges ? "Worker killed; partial edits may remain" : "Worker killed; no worktree edits detected" }],
@@ -324,7 +346,7 @@ export class RalphOrchestrator {
       }
     }
     await this.store.writeState(state);
-    if (killed === 0) await this.git.addAllAndCommit(`orchestrator: kill ${state.name}`);
+    if (killed === 0) await this.commitIfEnabled(state, `orchestrator: kill ${state.name}`);
     return { state, killed };
   }
 
@@ -333,7 +355,7 @@ export class RalphOrchestrator {
     if (state.control === "paused") throw new Error(`Loop is paused: ${state.name}. Use /loop-run ${state.name} to resume and run queued work.`);
     if (loopNeedsAttentionForRun(state)) throw new Error(`Loop needs attention before running: ${state.name}`);
     prepareResolutionRunScope(state);
-    await this.git.assertCleanWorktree({ ignorePrefixes: [".loop"] });
+    if (state.git?.requireCleanWorktree ?? true) await this.git.assertCleanWorktree({ ignorePrefixes: loopIgnoredPrefixes() });
 
     const workerMode = options.workerMode ?? "pi-json";
     const worker = workerMode === "scripted" ? new ScriptedMathWorker() : new PiJsonWorkerRunner();
@@ -342,7 +364,7 @@ export class RalphOrchestrator {
     const todo = state.todos.find((item) => item.status === "queued");
     if (!todo) {
       await this.store.writeState(state);
-      await this.git.addAllAndCommit(`orchestrator: idle ${state.name}`);
+      await this.commitIfEnabled(state, `orchestrator: idle ${state.name}`);
       return state;
     }
 
@@ -366,7 +388,7 @@ export class RalphOrchestrator {
     await fs.writeFile(path.join(this.store.getIterationDir(state.name, iterationNumber), "git-before.txt"), await this.git.captureStatus(), "utf8");
     await this.store.writeState(state);
     options.onProgress?.({ state, message: `Started loop iteration ${iterationNumber}: ${todo.title}` });
-    await this.git.addAllAndCommit(handoffCommitMessage(todo.id, iterationNumber));
+    await this.commitIfEnabled(state, handoffCommitMessage(todo.id, iterationNumber));
 
     const forwardWorkerProgress = (progress: WorkerProgress): void => {
       void (async () => {
@@ -388,7 +410,7 @@ export class RalphOrchestrator {
     }, forwardWorkerProgress);
 
     result.changedFiles = result.changedFiles.length > 0 ? result.changedFiles : await this.git.changedPaths();
-    iteration.diff = await this.git.diffStats("HEAD", { excludePrefixes: [".loop"], includeUntracked: true });
+    iteration.diff = await this.git.diffStats("HEAD", { excludePrefixes: loopIgnoredPrefixes(), includeUntracked: true });
     iteration.usage = result.usage;
     if (result.model) {
       iteration.observedModel = result.model;
@@ -438,7 +460,7 @@ export class RalphOrchestrator {
     await fs.writeFile(path.join(this.store.getIterationDir(state.name, iterationNumber), "git-after.txt"), await this.git.captureStatus(), "utf8");
     await this.store.writeState(state);
     options.onProgress?.({ state, message: `Finished loop iteration ${iterationNumber} with ${result.verification.status}` });
-    await this.git.addAllAndCommit(workerCommitMessage(todo.id, iterationNumber, result.commitSubject));
+    await this.commitIfEnabled(state, workerCommitMessage(todo.id, iterationNumber, result.commitSubject));
     await this.git.createRef(iteration.afterRef);
     await options.onIterationComplete?.({ state, iteration, todo, result });
 
@@ -474,7 +496,7 @@ export class RalphOrchestrator {
     state.runBudget = { remaining: max, updatedAt: new Date().toISOString(), updatedBy: "orchestrator" };
     prepareRunScope(state, max);
     await this.store.writeState(state);
-    await this.git.addAllAndCommit(`orchestrator: run ${state.name}`);
+    await this.commitIfEnabled(state, `orchestrator: run ${state.name}`);
 
     while (true) {
       state = await this.store.readState(slugifyLoopName(name));
@@ -530,6 +552,14 @@ function appendListSection(lines: string[], title: string, values: string[] | un
 
 function slify(name: string): string {
   return slugifyLoopName(name);
+}
+
+function loopIgnoredPrefixes(): string[] {
+  return [".loop", ".loops"];
+}
+
+function isLoopInternalPath(filePath: string): boolean {
+  return filePath === ".loop" || filePath === ".loops" || filePath.startsWith(".loop/") || filePath.startsWith(".loops/");
 }
 
 function selectRestartTodo(state: LoopState, requestedTodoId: string | undefined): RalphTodo {

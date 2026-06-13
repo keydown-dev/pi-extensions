@@ -88,7 +88,7 @@ Important constraints:
 - After subagent_loop_request_help returns, write handoff-out.md and verification.md with Status: not_run, then stop; do not resume implementation in this worker.
 - For non-ambiguity blockers, write handoff-out.md and verification.md explaining the blocker.
 - Before finishing, ensure verification.md has a line like: Status: passed OR Status: failed OR Status: not_run.
-- Include a ## Commit subject section in handoff-out.md with one short single-line commit subject that follows this project's commit style when you can infer it.
+- Follow the Git preferences in the handoff. Do not make commits unless explicitly instructed there; when asked for a commit subject, follow the stated convention.
 - Do not start the next Subagent Loop iteration.`;
   }
 }

@@ -81,6 +81,23 @@ export class GitPolicy {
       .map((line) => line.slice(3));
   }
 
+  async recentCommitSubjects(limit = 25): Promise<string[]> {
+    try {
+      const output = await this.run(["log", `-${limit}`, "--format=%s"], { trim: false });
+      return output
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean);
+    } catch {
+      return [];
+    }
+  }
+
+  async inferCommitConvention(): Promise<string> {
+    const subjects = await this.recentCommitSubjects();
+    return inferCommitConventionFromSubjects(subjects);
+  }
+
   async diffStats(base = "HEAD", options: { excludePrefixes?: string[]; includeUntracked?: boolean; includePaths?: string[] } = {}): Promise<{ filesChanged: number; insertions: number; deletions: number }> {
     const excludePrefixes = options.excludePrefixes ?? [];
     const pathspecs = [".", ...excludePrefixes.map((prefix) => `:(exclude)${prefix}`)];
@@ -126,24 +143,24 @@ export class GitPolicy {
       .filter((filePath) => !excludePrefixes.some((prefix) => filePath === prefix || filePath.startsWith(prefix.endsWith("/") ? prefix : `${prefix}/`)));
   }
 
-  async addAllAndCommit(message: string): Promise<boolean> {
+  async addAllAndCommit(message: string, options: { ignoreWorkerLogs?: boolean } = {}): Promise<boolean> {
     await this.run(["add", "-A"]);
-    await this.unstageRawRalphWorkerTraces();
+    if (options.ignoreWorkerLogs ?? true) await this.unstageRalphWorkerLogs();
     const staged = await this.run(["diff", "--cached", "--name-only"]);
     if (!staged.trim()) return false;
     await this.run(["commit", "-m", message]);
     return true;
   }
 
-  private async unstageRawRalphWorkerTraces(): Promise<void> {
+  private async unstageRalphWorkerLogs(): Promise<void> {
     const staged = await this.run(["diff", "--cached", "--name-only"], { trim: false });
-    const rawTracePaths = staged
+    const logPaths = staged
       .split("\n")
       .map((line) => line.trimEnd())
       .filter(Boolean)
-      .filter(isRawRalphWorkerTracePath);
-    if (rawTracePaths.length === 0) return;
-    await this.run(["reset", "-q", "HEAD", "--", ...rawTracePaths]);
+      .filter(isRalphWorkerLogPath);
+    if (logPaths.length === 0) return;
+    await this.run(["reset", "-q", "HEAD", "--", ...logPaths]);
   }
 
   private async isTracked(filePath: string): Promise<boolean> {
@@ -178,8 +195,8 @@ function isIgnoredStatusLine(line: string, ignorePrefixes: string[]): boolean {
   return ignorePrefixes.some((prefix) => pathPart === prefix || pathPart.startsWith(prefix.endsWith("/") ? prefix : `${prefix}/`));
 }
 
-function isRawRalphWorkerTracePath(filePath: string): boolean {
-  return filePath.startsWith(".loop/") && /(^|\/)worker-output\.raw\.jsonl(?:\..*)?$/.test(filePath);
+function isRalphWorkerLogPath(filePath: string): boolean {
+  return filePath.startsWith(".loop/") && /(^|\/)worker-output(?:\.raw)?\.jsonl(?:\..*)?$/.test(filePath);
 }
 
 function cleanDeclaredPaths(paths: string[], excludePrefixes: string[]): string[] {
@@ -207,4 +224,22 @@ export function beforeRef(loopName: string, iteration: number): string {
 
 export function afterRef(loopName: string, iteration: number): string {
   return `ralph/${loopName}/iter-${String(iteration).padStart(3, "0")}-after`;
+}
+
+export function inferCommitConventionFromSubjects(subjects: string[]): string {
+  const meaningful = subjects.map((subject) => subject.trim()).filter(Boolean);
+  if (meaningful.length === 0) return "Conventional Commits (e.g. feat: add capability, fix: correct behavior).";
+  const conventionalCount = meaningful.filter((subject) => /^(?:build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(?:\([^)]+\))?!?: .+/.test(subject)).length;
+  if (conventionalCount >= Math.ceil(meaningful.length * 0.5)) return "Follow the project's existing Conventional Commits style inferred from recent git history.";
+  const prefixes = meaningful
+    .map((subject) => subject.match(/^([A-Za-z][A-Za-z0-9_-]+):\s+/)?.[1])
+    .filter((prefix): prefix is string => Boolean(prefix));
+  const prefixCounts = new Map<string, number>();
+  for (const prefix of prefixes) prefixCounts.set(prefix, (prefixCounts.get(prefix) ?? 0) + 1);
+  const commonPrefixes = [...prefixCounts.entries()]
+    .filter(([, count]) => count >= 2)
+    .sort((a, b) => b[1] - a[1])
+    .map(([prefix]) => `${prefix}:`);
+  if (commonPrefixes.length > 0) return `Follow the project's existing commit prefix style inferred from recent git history (${commonPrefixes.slice(0, 5).join(", ")}).`;
+  return "Follow the short imperative commit-subject style inferred from recent git history; if uncertain, use Conventional Commits.";
 }

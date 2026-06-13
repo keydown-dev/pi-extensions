@@ -34,6 +34,12 @@ Useful things to clarify:
   - Examples: TDD, DDD, architecture review, writing continuity, research, issue triage, codebase-specific skills.
 - Which files should workers read before starting?
   - Examples: `CONTEXT.md`, `docs/adr/`, issue tracker links, style guides, plot outlines, continuity notes, test docs.
+- Which Git and artifact preferences should this loop use?
+  - Ask whether the loop should automatically commit per iteration or never commit automatically (manual commit mode).
+  - Ask whether each issue/todo should independently commit its work when automatic commits are enabled.
+  - Ask whether loop start/run should require a clean worktree or may begin with dirty non-loop changes.
+  - Inspect recent Git history and recommend the detected convention; if no clear convention is detected, recommend Conventional Commits unless the user chooses another convention.
+  - Ask whether raw and compacted sub-agent LLM logs should be ignored. Default/recommendation for a new project: ignore both. Persist the choice in `.loops/config.json` through `subagent_loop_start`.
 - Which verification steps must workers perform?
   - Examples: test commands, lint/typecheck commands, manual checks, snapshot review, acceptance criteria.
 - Which standards should workers hold themselves to?
@@ -57,6 +63,7 @@ Put this in the loop packet and handoffs:
 - per-iteration definition of done
 - verification required for this loop
 - default subagent model to use, if subagents are selected and different from the orchestrator model
+- Git/artifact preferences: commit mode (`per_iteration` or `manual`), independent per-issue commit expectation, clean-worktree policy, commit convention, and whether raw/compact sub-agent LLM logs are ignored
 - per-todo execution-mode or model overrides, if any
 - model precedence for subagent todos: todo override → loop default → run-level fallback → current/default Pi model
 - skills to invoke and when
@@ -183,6 +190,14 @@ When ready, present:
 - Forbidden/out-of-scope work:
 - Stop/ask-user conditions:
 
+## Git / Artifact Preferences
+- Commit mode: per_iteration | manual
+- Should each issue/todo independently commit its work when automatic commits are enabled?
+- Require clean worktree before loop work: yes | no
+- Commit convention: detected project convention | Conventional Commits | other
+- Ignore raw and compacted sub-agent LLM logs: yes | no
+- Persisted project config: `.loops/config.json`
+
 ## Stop / Request-Help Conditions
 - When workers should call `subagent_loop_request_help` instead of guessing:
 
@@ -201,6 +216,7 @@ When ready, present:
 ## Verification
 
 ## Handoff / Reporting Requirements
+- Git/commit instructions workers should follow:
 
 ## Durable Project Context
 - Docs workers should treat as source of truth:

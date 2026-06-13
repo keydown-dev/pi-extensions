@@ -1,6 +1,7 @@
 import path from "node:path";
 
 export const ROOT_DIR = path.join(".loop", "orchestrator");
+export const PROJECT_CONFIG_DIR = ".loops";
 
 export function slugifyLoopName(name: string): string {
   const slug = name.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
@@ -18,4 +19,8 @@ export function iterationDir(cwd: string, name: string, iteration: number): stri
 
 export function statePath(cwd: string, name: string): string {
   return path.join(loopDir(cwd, name), "state.json");
+}
+
+export function projectConfigPath(cwd: string): string {
+  return path.join(cwd, PROJECT_CONFIG_DIR, "config.json");
 }

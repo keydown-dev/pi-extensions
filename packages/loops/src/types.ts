@@ -5,6 +5,20 @@ export type TodoStatus = "queued" | "running" | "complete" | "deferred" | "faile
 
 export type RalphTodoId = string | number;
 
+export type LoopCommitMode = "per_iteration" | "manual";
+
+export interface LoopGitPreferences {
+  commitMode: LoopCommitMode;
+  requireCleanWorktree: boolean;
+  commitConvention: string;
+  ignoreWorkerLogs: boolean;
+}
+
+export interface LoopProjectConfig {
+  version: 1;
+  git: LoopGitPreferences;
+}
+
 export interface WorkerModelAssignment {
   model?: string;
   provider?: string;
@@ -189,6 +203,7 @@ export interface LoopState {
   maxIterations?: number;
   runBudget?: RunBudget;
   workerDefaults?: WorkerModelAssignment;
+  git?: LoopGitPreferences;
   todos: RalphTodo[];
   iterations: IterationState[];
 }
@@ -200,6 +215,10 @@ export interface StartOptions {
   defaultWorkerModel?: string;
   defaultWorkerProvider?: string;
   defaultWorkerContextWindow?: number;
+  commitMode?: LoopCommitMode;
+  requireCleanWorktree?: boolean;
+  commitConvention?: string;
+  ignoreWorkerLogs?: boolean;
 }
 
 export type WorkerMode = "scripted" | "pi-json";

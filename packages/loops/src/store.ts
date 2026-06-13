@@ -2,8 +2,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
-import type { IterationState, LoopState, RalphTodo, TodoStatus, VerificationRecord, WorkerResult } from "./types.js";
-import { ROOT_DIR, iterationDir, loopDir, statePath, slugifyLoopName } from "./paths.js";
+import type { IterationState, LoopGitPreferences, LoopProjectConfig, LoopState, RalphTodo, TodoStatus, VerificationRecord, WorkerResult } from "./types.js";
+import { ROOT_DIR, iterationDir, loopDir, projectConfigPath, statePath, slugifyLoopName } from "./paths.js";
 
 export class RalphStore {
   constructor(private readonly cwd: string) {}
@@ -25,7 +25,8 @@ export class RalphStore {
     }
   }
 
-  async createLoop(name: string, todos: string[], branch: string, maxIterations?: number, workerDefaults?: LoopState["workerDefaults"]): Promise<LoopState> {
+  async createLoop(name: string, todos: string[], branch: string, maxIterations?: number, workerDefaults?: LoopState["workerDefaults"], gitPreferences?: LoopGitPreferences): Promise<LoopState> {
+    const projectConfig = await this.ensureProjectConfig(gitPreferences);
     const now = new Date().toISOString();
     const state: LoopState = {
       name: slugifyLoopName(name),
@@ -36,11 +37,12 @@ export class RalphStore {
       updatedAt: now,
       maxIterations,
       ...(workerDefaults && hasWorkerDefaults(workerDefaults) ? { workerDefaults } : {}),
+      git: projectConfig.git,
       todos: todos.map<RalphTodo>((title, index) => ({ id: semanticTodoId(title, index), title, status: initialTodoStatus(index, maxIterations) })),
       iterations: [],
     };
     await fs.mkdir(path.join(this.getLoopDir(name), "iterations"), { recursive: true });
-    await ensureRalphArtifactGitignore(this.cwd);
+    await ensureRalphArtifactGitignore(this.cwd, projectConfig.git.ignoreWorkerLogs);
     await fs.writeFile(path.join(this.getLoopDir(name), "plan.md"), renderPlan(state), "utf8");
     await fs.writeFile(path.join(this.getLoopDir(name), "decisions.md"), `# Decisions: ${state.name}\n\n`, "utf8");
     await this.writeState(state);
@@ -76,7 +78,7 @@ export class RalphStore {
   async writeState(state: LoopState): Promise<void> {
     state.updatedAt = new Date().toISOString();
     await fs.mkdir(this.getLoopDir(state.name), { recursive: true });
-    await ensureRalphArtifactGitignore(this.cwd);
+    await ensureRalphArtifactGitignore(this.cwd, state.git?.ignoreWorkerLogs ?? true);
     await fs.writeFile(statePath(this.cwd, state.name), `${JSON.stringify(state, null, 2)}\n`, "utf8");
     await fs.writeFile(path.join(this.getLoopDir(state.name), "plan.md"), renderPlan(state), "utf8");
   }
@@ -87,6 +89,24 @@ export class RalphStore {
     await fs.writeFile(path.join(dir, "handoff-in.md"), renderHandoffIn(state, iteration, todo), "utf8");
     await fs.writeFile(path.join(dir, "verification.md"), "# Verification\n\n_Status: not_run_\n", "utf8");
     await fs.writeFile(path.join(dir, "worker-output.jsonl"), "", "utf8");
+  }
+
+  async readProjectConfig(): Promise<LoopProjectConfig | undefined> {
+    try {
+      return parseLoopProjectConfigJson(await fs.readFile(projectConfigPath(this.cwd), "utf8"), projectConfigPath(this.cwd));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+      throw error;
+    }
+  }
+
+  async ensureProjectConfig(gitPreferences?: LoopGitPreferences): Promise<LoopProjectConfig> {
+    const existing = await this.readProjectConfig();
+    if (existing && !gitPreferences) return existing;
+    const config: LoopProjectConfig = { version: 1, git: gitPreferences ?? existing?.git ?? defaultLoopGitPreferences() };
+    await fs.mkdir(path.dirname(projectConfigPath(this.cwd)), { recursive: true });
+    await fs.writeFile(projectConfigPath(this.cwd), `${JSON.stringify(config, null, 2)}\n`, "utf8");
+    return config;
   }
 
   async writeWorkerArtifacts(state: LoopState, iteration: IterationState, result: WorkerResult): Promise<void> {
@@ -109,6 +129,15 @@ async function fileExists(filePath: string): Promise<boolean> {
   }
 }
 
+function defaultLoopGitPreferences(): LoopGitPreferences {
+  return {
+    commitMode: "per_iteration",
+    requireCleanWorktree: true,
+    commitConvention: "Conventional Commits (e.g. feat: add capability, fix: correct behavior).",
+    ignoreWorkerLogs: true,
+  };
+}
+
 function hasWorkerDefaults(workerDefaults: LoopState["workerDefaults"]): boolean {
   return Boolean(workerDefaults?.model || workerDefaults?.provider || workerDefaults?.contextWindow);
 }
@@ -128,7 +157,8 @@ function semanticTodoId(title: string, index: number): string {
 }
 
 function renderPlan(state: LoopState): string {
-  const lines = [`# Ralph loop: ${state.name}`, "", `Control: ${state.control}`, "", "## Todo", ""];
+  const git = state.git ?? defaultLoopGitPreferences();
+  const lines = [`# Ralph loop: ${state.name}`, "", `Control: ${state.control}`, "", "## Git / Artifact Preferences", "", `- Commit mode: ${git.commitMode}`, `- Require clean worktree before loop work: ${git.requireCleanWorktree ? "yes" : "no"}`, `- Commit convention: ${git.commitConvention}`, `- Ignore sub-agent LLM logs: ${git.ignoreWorkerLogs ? "yes" : "no"}`, "", "## Todo", ""];
   for (const todo of state.todos) {
     const box = todo.status === "complete" ? "x" : " ";
     const model = todo.workerModel ? ` · model: ${todo.workerModel}` : state.workerDefaults?.model ? ` · model: ${state.workerDefaults.model}` : "";
@@ -142,7 +172,11 @@ function renderPlan(state: LoopState): string {
 function renderHandoffIn(state: LoopState, iteration: IterationState, todo: RalphTodo): string {
   const modelLine = iteration.configuredModel ?? iteration.model ? `\nWorker model: ${iteration.configuredModel ?? iteration.model}\n` : "";
   const resolutionContext = renderResolutionSubtaskContext(state, todo);
-  return `# Ralph handoff-in\n\nLoop: ${state.name}\nIteration: ${iteration.number}\nTodo: ${todo.id}. ${todo.title}${modelLine}\n## Task\n\nComplete exactly this todo item. Keep changes bounded and record verification.${resolutionContext}\n\n## Required output\n\nProduce handoff-out.md and verification.md for this iteration. Include a ## Commit subject section in handoff-out.md with one short single-line commit subject that follows this project's commit style when you can infer it.\n`;
+  const git = state.git ?? defaultLoopGitPreferences();
+  const commitSubjectInstruction = git.commitMode === "per_iteration"
+    ? `Include a ## Commit subject section in handoff-out.md with one short single-line commit subject. Follow this commit convention: ${git.commitConvention}`
+    : `Do not make git commits. You may include a ## Commit subject suggestion in handoff-out.md for the human's later manual commit. If you do, follow this commit convention: ${git.commitConvention}`;
+  return `# Ralph handoff-in\n\nLoop: ${state.name}\nIteration: ${iteration.number}\nTodo: ${todo.id}. ${todo.title}${modelLine}\n## Task\n\nComplete exactly this todo item. Keep changes bounded and record verification.${resolutionContext}\n\n## Git preferences\n\n- Commit mode: ${git.commitMode}\n- Require clean worktree before loop work: ${git.requireCleanWorktree ? "yes" : "no"}\n- Commit convention: ${git.commitConvention}\n- Ignore sub-agent LLM logs: ${git.ignoreWorkerLogs ? "yes" : "no"}\n\n## Required output\n\nProduce handoff-out.md and verification.md for this iteration. ${commitSubjectInstruction}\n`;
 }
 
 function renderResolutionSubtaskContext(state: LoopState, todo: RalphTodo): string {
@@ -172,9 +206,11 @@ function renderVerification(verification: VerificationRecord): string {
   return lines.join("\n");
 }
 
-const RALPH_ARTIFACT_GITIGNORE = `# Loop-managed local diagnostics\nworker-output.raw.jsonl\nworker-output.raw.jsonl.*\n*.raw.jsonl\n*.raw.jsonl.*\n`;
+const RALPH_ARTIFACT_GITIGNORE_BASE = `# Loop-managed local diagnostics\n`;
 
-async function ensureRalphArtifactGitignore(cwd: string): Promise<void> {
+const RALPH_ARTIFACT_LOG_GITIGNORE = `worker-output.jsonl\nworker-output.jsonl.*\nworker-output.raw.jsonl\nworker-output.raw.jsonl.*\n*.raw.jsonl\n*.raw.jsonl.*\n`;
+
+async function ensureRalphArtifactGitignore(cwd: string, ignoreWorkerLogs: boolean): Promise<void> {
   const root = path.join(cwd, ".loop");
   const gitignorePath = path.join(root, ".gitignore");
   await fs.mkdir(root, { recursive: true });
@@ -185,8 +221,9 @@ async function ensureRalphArtifactGitignore(cwd: string): Promise<void> {
     // Create the file below.
   }
 
+  const desired = `${RALPH_ARTIFACT_GITIGNORE_BASE}${ignoreWorkerLogs ? RALPH_ARTIFACT_LOG_GITIGNORE : ""}`;
   const existingLines = new Set(existing.split(/\r?\n/));
-  const missingLines = RALPH_ARTIFACT_GITIGNORE.split("\n").filter((line) => line && !existingLines.has(line));
+  const missingLines = desired.split("\n").filter((line) => line && !existingLines.has(line));
   if (missingLines.length === 0) return;
 
   const prefix = existing.length === 0 || existing.endsWith("\n") ? "" : "\n";
@@ -233,6 +270,18 @@ const WorkerModelAssignmentSchema = Type.Object({
   model: Type.Optional(Type.String()),
   provider: Type.Optional(Type.String()),
   contextWindow: Type.Optional(Type.Number()),
+}, { additionalProperties: false });
+
+const LoopGitPreferencesSchema = Type.Object({
+  commitMode: Type.Union([Type.Literal("per_iteration"), Type.Literal("manual")]),
+  requireCleanWorktree: Type.Boolean(),
+  commitConvention: Type.String(),
+  ignoreWorkerLogs: Type.Boolean(),
+}, { additionalProperties: false });
+
+const LoopProjectConfigSchema = Type.Object({
+  version: Type.Literal(1),
+  git: LoopGitPreferencesSchema,
 }, { additionalProperties: false });
 
 const IterationStateSchema = Type.Object({
@@ -311,25 +360,34 @@ const LoopStateSchema = Type.Object({
   maxIterations: Type.Optional(Type.Number()),
   runBudget: Type.Optional(RunBudgetSchema),
   workerDefaults: Type.Optional(WorkerModelAssignmentSchema),
+  git: Type.Optional(LoopGitPreferencesSchema),
   todos: Type.Array(RalphTodoSchema),
   iterations: Type.Array(IterationStateSchema),
 }, { additionalProperties: false });
 
 export function parseLoopStateJson(text: string, filePath = "state.json"): LoopState {
+  return parseJsonWithSchema(text, filePath, LoopStateSchema, "Ralph state") as LoopState;
+}
+
+export function parseLoopProjectConfigJson(text: string, filePath = ".loops/config.json"): LoopProjectConfig {
+  return parseJsonWithSchema(text, filePath, LoopProjectConfigSchema, "loop project config") as LoopProjectConfig;
+}
+
+function parseJsonWithSchema(text: string, filePath: string, schema: typeof LoopStateSchema | typeof LoopProjectConfigSchema, label: string): unknown {
   let value: unknown;
   try {
     value = JSON.parse(text);
   } catch (error) {
-    throw new Error(`Invalid Ralph state JSON in ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(`Invalid ${label} JSON in ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
   }
 
-  if (Value.Check(LoopStateSchema, value)) return value;
+  if (Value.Check(schema, value)) return value;
 
-  const errors = [...Value.Errors(LoopStateSchema, value)]
+  const errors = [...Value.Errors(schema, value)]
     .slice(0, 5)
     .map((error) => `${filePath}${formatInstancePath(error.instancePath)}: ${error.message}`)
     .join("; ");
-  throw new Error(`Invalid Ralph state in ${filePath}: ${errors || "schema validation failed"}`);
+  throw new Error(`Invalid ${label} in ${filePath}: ${errors || "schema validation failed"}`);
 }
 
 function formatInstancePath(instancePath: string): string {

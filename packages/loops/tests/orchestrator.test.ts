@@ -1260,7 +1260,7 @@ test("loop gitignore generation is idempotent and preserves custom rules", async
   assert.equal((ralphGitignore.match(/^worker-output\.raw\.jsonl\.\*$/gm) ?? []).length, 1);
 });
 
-test("tracked ralph artifacts commit compact output but exclude raw traces", async (t) => {
+test("tracked ralph artifacts ignore compact and raw worker logs by default", async (t) => {
   const cwd = await createMathFixture();
   t.after(() => fs.rm(cwd, { recursive: true, force: true }));
   await fs.writeFile(path.join(cwd, ".gitignore"), ".loop-orchestrator/\n.tmp/\n", "utf8");
@@ -1298,8 +1298,9 @@ console.log(JSON.stringify({ type: "message_end", message: { role: "assistant", 
 
   const tracked = (await execFileAsync("git", ["ls-files", ".loop"], { cwd })).stdout;
   assert.match(tracked, /\.loop\/.gitignore/);
-  assert.match(tracked, /worker-output\.jsonl/);
+  assert.doesNotMatch(tracked, /worker-output\.jsonl/);
   assert.doesNotMatch(tracked, /worker-output\.raw\.jsonl/);
+  await fs.access(path.join(cwd, ".loop", "orchestrator", "loops", state.name, "iterations", "001", "worker-output.jsonl"));
   await fs.access(path.join(cwd, ".loop", "orchestrator", "loops", state.name, "iterations", "001", "worker-output.raw.jsonl"));
 });
 
